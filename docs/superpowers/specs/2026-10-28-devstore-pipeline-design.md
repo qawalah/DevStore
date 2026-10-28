@@ -376,3 +376,58 @@ Removing an app stops and uninstalls its service and deletes its shortcut.
   Revisit if it happens.
 - Multiple PCs (the design works on several PCs, but only one is tested).
 - Docker, a dashboard, and update notifications (toasts).
+
+## 13. DevStore Manager (Windows UI)
+
+Added at the user's request ("an app with UI for the Windows side"). It's a
+desktop window for seeing and controlling the updater. It **doesn't replace**
+the scheduled task, which keeps doing the updating even when the Manager is
+closed.
+
+**Tech:** Python + tkinter/ttk (standard library, small PyInstaller build).
+The code is split into `model.py` (pure logic, unit-tested), `actions.py`
+(runs elevated commands) and `ui.py` (widgets only).
+
+**Delivery (dogfooding):** the Manager lives in `windows/manager/` with its
+own `devstore.json` (`type: gui`). It's built by the same
+`windows-release.yml` (new input `working-directory`) from the DevStore repo
+itself, and installed and updated by the updater like any other app.
+`Install-DevStoreAgent.ps1` adds `qawalah/devstore` to `config.json`
+automatically. Its shortcut is "DevStore Manager". Like any GUI app, its own
+updates wait until it's closed.
+
+**What it shows** (re-read from disk every 15 s, plus a Refresh button):
+- One row per app: name, type, installed version, latest available version,
+  status, last checked. Status is one of: Up to date, Update pending
+  (waiting for the app to close), Running/Stopped (services), Failed (rolled
+  back: version X marked bad), or Not installed yet.
+- Footer: the updater task's last run time and result, plus the next run.
+- Selected app details: the last 50 log lines for that app.
+
+**Actions:**
+- **Check now** runs the updater task immediately.
+- **Add app…** asks for a repo (`qawalah/<app>`).
+- **Remove** asks for confirmation; data is kept.
+- **Launch** (GUI apps) and **Start/Stop/Restart** (services).
+- **Open data folder**.
+
+Actions that change the system (Check now, Add, Remove, Start/Stop/Restart)
+go through one Windows admin (UAC) prompt each, by running the agent scripts
+elevated. The Manager itself runs as a normal user, with **read-only** access
+to `config.json`, `state.json` and logs, and **no** access to `token.dat`.
+
+**State contract with the updater** (so the Manager never calls GitHub
+itself and needs no token): after each run, `state.json` holds, per app:
+`installed`, `previous`, `latest`, `type`, `exe`, `status`, `lastChecked`,
+`lastError`, `bad` (list). At the top level it holds `lastRun` and
+`lastRunResult`.
+
+**Permissions** (set by the installer): `C:\DevStore` gives Users read and
+execute access, which they need to run GUI apps and for the Manager to read
+state. `token.dat` has inheritance removed and is limited to SYSTEM and
+Administrators.
+
+**Tests:** pytest for `model.py`: building rows from state, config and
+service info, status mapping, log filtering, and tolerating missing or
+corrupt `state.json`. pytest for `actions.py`, checking the exact
+command lines with `subprocess` mocked. The UI is checked by hand on the PC.
