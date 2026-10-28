@@ -1,0 +1,7 @@
+{
+  "name": "devstore-manager",
+  "displayName": "DevStore Manager",
+  "type": "gui",
+  "entry": "main.py",
+  "version": "1.0.0"
+}

@@ -1,0 +1,147 @@
+# DevStore.Core: pure decision logic for the DevStore Windows updater.
+# No network, services or file-system side effects except the JSON helpers.
+# Must stay compatible with Windows PowerShell 5.1.
+
+Set-StrictMode -Version 2
+
+$script:TagPattern = '^windows-v(\d+\.\d+\.\d+)$'
+
+function ConvertFrom-DevStoreTag {
+    param([string]$Tag)
+    if ($Tag -match $script:TagPattern) { return [version]$Matches[1] }
+    return $null
+}
+
+function Select-DevStoreRelease {
+    # Highest-version published windows-v release whose version isn't marked bad.
+    param($Releases, [string[]]$Bad = @())
+    $best = $null
+    $bestVersion = $null
+    foreach ($r in @($Releases)) {
+        if ($null -eq $r -or $r.draft -or $r.prerelease) { continue }
+        $v = ConvertFrom-DevStoreTag $r.tag_name
+        if ($null -eq $v) { continue }
+        if (@($Bad) -contains $v.ToString()) { continue }
+        if ($null -eq $bestVersion -or $v -gt $bestVersion) {
+            $best = $r
+            $bestVersion = $v
+        }
+    }
+    return $best
+}
+
+function ConvertTo-DevStoreHashtable {
+    # ConvertFrom-Json gives PSCustomObjects; PS 5.1 has no -AsHashtable.
+    param($InputObject)
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $h = @{}
+        foreach ($p in $InputObject.PSObject.Properties) {
+            $h[$p.Name] = ConvertTo-DevStoreHashtable $p.Value
+        }
+        return $h
+    }
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        $list = @(foreach ($i in $InputObject) { ConvertTo-DevStoreHashtable $i })
+        return , $list
+    }
+    return $InputObject
+}
+
+function Read-DevStoreJson {
+    # Missing, empty or corrupt file -> $Default. Objects come back as hashtables.
+    param([string]$Path, $Default)
+    if (-not (Test-Path -LiteralPath $Path)) { return $Default }
+    try {
+        $text = [System.IO.File]::ReadAllText($Path)
+        if ([string]::IsNullOrWhiteSpace($text)) { return $Default }
+        $obj = $text | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $obj) { return $Default }
+        return ConvertTo-DevStoreHashtable $obj
+    }
+    catch {
+        return $Default
+    }
+}
+
+function Write-DevStoreJson {
+    # Write to <path>.tmp, then replace, so readers never see a half-written file.
+    param([string]$Path, $Object)
+    $json = ConvertTo-Json -InputObject $Object -Depth 10
+    $tmp = "$Path.tmp"
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
+function Get-DevStoreAction {
+    # 'install' (nothing installed), 'update' (newer version) or 'none'.
+    param($AppState, [string]$Version)
+    if ($null -eq $AppState -or -not $AppState['installed']) { return 'install' }
+    if ([version]$Version -gt [version]$AppState['installed']) { return 'update' }
+    return 'none'
+}
+
+function Get-DevStorePruneList {
+    # Installed version folders to delete: everything except current and previous.
+    param([string[]]$Versions, [string]$Current, [string]$Previous)
+    $keep = @($Current, $Previous) | Where-Object { $_ }
+    return @(@($Versions) | Where-Object { $_ -and ($keep -notcontains $_) })
+}
+
+function Test-DevStoreHash {
+    # $ShaText is the content of a .sha256 file: "<hex>  <filename>" or just "<hex>".
+    param([string]$File, [string]$ShaText)
+    if ([string]::IsNullOrWhiteSpace($ShaText)) { return $false }
+    $expected = ($ShaText.Trim() -split '\s+')[0]
+    if ($expected -notmatch '^[0-9a-fA-F]{64}$') { return $false }
+    $actual = (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash
+    return ($actual -ieq $expected)
+}
+
+function New-DevStoreWinswXml {
+    # WinSW v2 service definition; the exe path points at the 'current' junction.
+    param([string]$Name, [string]$Exe, [string]$LogDir)
+    $e = [System.Security.SecurityElement]
+    return @"
+<service>
+  <id>devstore-$($e::Escape($Name))</id>
+  <name>DevStore: $($e::Escape($Name))</name>
+  <description>Installed and updated by the DevStore Updater.</description>
+  <executable>$($e::Escape($Exe))</executable>
+  <startmode>Automatic</startmode>
+  <stoptimeout>30 sec</stoptimeout>
+  <onfailure action="restart" delay="10 sec"/>
+  <logpath>$($e::Escape($LogDir))</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+</service>
+"@
+}
+
+function Test-DevStoreRepoName {
+    param([string]$Repo)
+    return ($Repo -match '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$' -and $Repo -notmatch '\.\.')
+}
+
+function Set-DevStoreConfigApp {
+    # Adds ($Present = $true) or removes a repo in config.apps; case-insensitive, idempotent.
+    param([hashtable]$Config, [string]$Repo, [bool]$Present)
+    $apps = @()
+    if ($Config.ContainsKey('apps') -and $null -ne $Config['apps']) { $apps = @($Config['apps']) }
+    $others = @($apps | Where-Object { $_ -and $_['repo'] -ine $Repo })
+    if ($Present) {
+        $existing = @($apps | Where-Object { $_ -and $_['repo'] -ieq $Repo })
+        if ($existing.Count -gt 0) { $Config['apps'] = $apps; return $Config }
+        $others += @{ repo = $Repo }
+    }
+    $Config['apps'] = $others
+    return $Config
+}
+
+Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
+    Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
+    New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp

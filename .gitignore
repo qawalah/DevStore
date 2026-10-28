@@ -1,0 +1,15 @@
+# Signing keys: never commit
+*.jks
+*.keystore
+
+# Python
+__pycache__/
+.pytest_cache/
+*.spec
+build/
+dist/
+
+# Android / Gradle
+.gradle/
+local.properties
+*.apk
