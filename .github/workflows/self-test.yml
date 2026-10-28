@@ -12,6 +12,7 @@ jobs:
   pester:
     name: Updater tests (${{ matrix.shell }})
     runs-on: windows-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +24,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Install Pester 5.7.1
         run: |
+          # Windows PowerShell 5.1 otherwise waits on a hidden NuGet provider prompt.
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
       - name: Run Pester
