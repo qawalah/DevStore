@@ -1,5 +1,5 @@
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot '..' 'DevStore.Core.psm1') -Force
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'DevStore.Core.psm1') -Force
 
     function New-Release($Tag, [switch]$Draft, [switch]$Prerelease) {
         [pscustomobject]@{ tag_name = $Tag; draft = [bool]$Draft; prerelease = [bool]$Prerelease; assets = @() }
