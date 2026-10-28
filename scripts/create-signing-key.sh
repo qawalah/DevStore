@@ -11,8 +11,13 @@ if [ -e "$OUT" ]; then
 fi
 command -v keytool >/dev/null || { echo "keytool not found: install a JDK (17+)" >&2; exit 1; }
 
+GENERATED=""
 if [ -n "${DEVSTORE_KEYSTORE_PASSWORD:-}" ]; then
   PASS="$DEVSTORE_KEYSTORE_PASSWORD"
+elif [ ! -t 0 ]; then
+  # No keyboard (for example a Claude Code session): make a strong random password.
+  PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  GENERATED="yes"
 else
   read -r -s -p "New keystore password (min 8 chars): " PASS; echo
   read -r -s -p "Repeat password: " PASS2; echo
@@ -31,7 +36,7 @@ Created $OUT (alias: devstore, valid 30 years).
 Add these two secrets to EVERY app repo
 (GitHub -> repo -> Settings -> Secrets and variables -> Actions -> New repository secret):
 
-  DEVSTORE_KEYSTORE_PASSWORD = the password you just typed
+  DEVSTORE_KEYSTORE_PASSWORD = ${GENERATED:+$PASS   (generated for you)}${GENERATED:-the password you just typed}
   DEVSTORE_KEYSTORE_B64      = the text between the lines below
 
 -----BEGIN DEVSTORE_KEYSTORE_B64-----
