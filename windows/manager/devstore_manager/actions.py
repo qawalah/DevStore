@@ -1,0 +1,140 @@
+"""Things the DevStore Manager does to the system. Changes go through the
+agent scripts in C:\\DevStore\\agent, run elevated (one UAC prompt each),
+because the Manager itself runs as a normal user with read-only access."""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(os.environ.get("DEVSTORE_ROOT", r"C:\DevStore"))
+AGENT_DIR = ROOT / "agent"
+LOG_DIR = ROOT / "logs"
+
+REPO_RE = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
+NAME_RE = re.compile(r"^[a-z0-9-]+$")
+SERVICE_ACTIONS = ("Start", "Stop", "Restart")
+_SAFE_VALUE = re.compile(r"^[A-Za-z0-9._/-]+$")
+_CREATE_NO_WINDOW = 0x08000000
+
+
+class Cancelled(Exception):
+    """The user said no to the Windows admin (UAC) prompt."""
+
+
+class ActionFailed(Exception):
+    pass
+
+
+def elevated_args(script: str, **params: str) -> str:
+    """Command line for powershell.exe running an agent script with -Name "value" params."""
+    parts = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+             "-File", f'"{AGENT_DIR / script}"']
+    for key, value in params.items():
+        if not _SAFE_VALUE.match(value or "") or ".." in value:
+            raise ValueError(f"Unsafe value for -{key}: {value!r}")
+        parts.append(f'-{key} "{value}"')
+    return " ".join(parts)
+
+
+def _shell_execute_wait(file: str, params: str) -> int:
+    """ShellExecuteEx with the 'runas' verb (UAC prompt); waits and returns the exit code."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE),
+        ]
+
+    SEE_MASK_NOCLOSEPROCESS, SW_HIDE, ERROR_CANCELLED, INFINITE = 0x40, 0, 1223, 0xFFFFFFFF
+    info = SHELLEXECUTEINFOW(cbSize=ctypes.sizeof(SHELLEXECUTEINFOW), fMask=SEE_MASK_NOCLOSEPROCESS,
+                             lpVerb="runas", lpFile=file, lpParameters=params, nShow=SW_HIDE)
+    shell32, kernel32 = ctypes.windll.shell32, ctypes.windll.kernel32
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):
+        if ctypes.GetLastError() == ERROR_CANCELLED:
+            raise Cancelled()
+        raise ActionFailed(f"Couldn't start PowerShell (error {ctypes.GetLastError()}).")
+    try:
+        kernel32.WaitForSingleObject(info.hProcess, INFINITE)
+        code = wintypes.DWORD()
+        kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
+        return code.value
+    finally:
+        kernel32.CloseHandle(info.hProcess)
+
+
+def run_elevated(script: str, **params: str) -> None:
+    code = _shell_execute_wait("powershell.exe", elevated_args(script, **params))
+    if code != 0:
+        raise ActionFailed(f"{script} failed (exit code {code}). Details are in {LOG_DIR}.")
+
+
+def check_now() -> None:
+    run_elevated("Start-DevStoreCheck.ps1")
+
+
+def add_app(repo: str) -> None:
+    repo = repo.strip()
+    if not REPO_RE.match(repo):
+        raise ValueError("Enter the repo as owner/name, for example qawalah/my-app.")
+    run_elevated("Add-DevStoreApp.ps1", Repo=repo)
+
+
+def remove_app(repo: str) -> None:
+    run_elevated("Remove-DevStoreApp.ps1", Repo=repo)
+
+
+def service_action(name: str, action: str) -> None:
+    if action not in SERVICE_ACTIONS or not NAME_RE.match(name):
+        raise ValueError(f"Can't {action} {name}.")
+    run_elevated("Invoke-DevStoreServiceAction.ps1", Name=name, Action=action)
+
+
+def app_exe(name: str, exe: str) -> Path:
+    return ROOT / "apps" / name / "current" / exe
+
+
+def data_dir(name: str) -> Path:
+    return Path(os.environ.get("ProgramData", r"C:\ProgramData")) / name
+
+
+def launch(path: Path) -> None:
+    os.startfile(str(path))  # type: ignore[attr-defined]  # Windows only
+
+
+def open_folder(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.startfile(str(path))  # type: ignore[attr-defined]
+
+
+_SC_STATES = {"RUNNING": "Running", "STOPPED": "Stopped", "START_PENDING": "Starting",
+              "STOP_PENDING": "Stopping", "PAUSED": "Paused"}
+
+
+def parse_sc_state(output: str):
+    m = re.search(r"STATE\s*:\s*\d+\s+(\w+)", output)
+    return _SC_STATES.get(m.group(1), m.group(1).title()) if m else None
+
+
+def service_statuses(names: list[str]) -> dict[str, str]:
+    """{'devstore-x': 'Running', ...} for services that exist. Readable without admin."""
+    result = {}
+    if sys.platform != "win32":
+        return result
+    for svc in names:
+        try:
+            out = subprocess.run(["sc.exe", "query", svc], capture_output=True, text=True,
+                                 timeout=5, creationflags=_CREATE_NO_WINDOW).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        state = parse_sc_state(out)
+        if state:
+            result[svc] = state
+    return result

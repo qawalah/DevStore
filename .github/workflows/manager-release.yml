@@ -1,0 +1,21 @@
+# Releases the DevStore Manager (windows/manager) through DevStore's own
+# Windows pipeline. The DevStore Updater installs and updates it on the PC.
+name: Manager release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - windows/manager/**
+      - .github/workflows/windows-release.yml
+      - .github/workflows/manager-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/windows-release.yml
+    with:
+      working-directory: windows/manager
