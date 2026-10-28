@@ -22,15 +22,13 @@ jobs:
         shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v5
-      - name: Install Pester 5.7.1
-        run: |
-          # Windows PowerShell 5.1 otherwise waits on a hidden NuGet provider prompt.
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          Set-PSRepository PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
+      - name: Download Pester 5.7.1
+        # Always via PowerShell 7: Windows PowerShell 5.1's old PowerShellGet hangs on prompts.
+        shell: pwsh
+        run: Save-Module Pester -RequiredVersion 5.7.1 -Repository PSGallery -Path "$env:RUNNER_TEMP\modules" -Force
       - name: Run Pester
         run: |
-          Import-Module Pester -RequiredVersion 5.7.1
+          Import-Module "$env:RUNNER_TEMP\modules\Pester\5.7.1\Pester.psd1"
           $c = New-PesterConfiguration
           $c.Run.Path = 'windows/agent/tests'
           $c.Run.Exit = $true
