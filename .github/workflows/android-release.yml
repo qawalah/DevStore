@@ -34,16 +34,23 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
-      - uses: android-actions/setup-android@v3
+      - name: Check Android SDK
+        run: |
+          # GitHub's ubuntu runners ship the Android SDK; AGP downloads any missing platform.
+          if [ -z "${ANDROID_HOME:-}" ] || [ ! -d "$ANDROID_HOME/build-tools" ]; then
+            echo "::error::Android SDK not found (ANDROID_HOME='${ANDROID_HOME:-}')"
+            exit 1
+          fi
+          echo "Using $ANDROID_HOME with build-tools: $(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
 
       - name: Prepare signing key
         env:
