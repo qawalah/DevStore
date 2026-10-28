@@ -14,8 +14,11 @@ About 30 minutes per app. Before the first app, do the one-time setup:
    ask: *"Run `scripts/create-signing-key.sh` for me."* Or run it yourself
    anywhere with Java installed. It prints two values:
    `DEVSTORE_KEYSTORE_B64` and `DEVSTORE_KEYSTORE_PASSWORD`.
-   - **Save both values and the `devstore.jks` file in your password
-     manager.** You'll paste the same two values into every Android app repo.
+   - In a Claude Code session there's no keyboard, so the script makes a
+     random password and prints it. **Copy both printed values** (the
+     password and the long text between the BEGIN/END lines) into your
+     password manager. The long text *is* the key. The cloud session's
+     `devstore.jks` file disappears when the session ends, and that's fine. You'll paste the same two values into every Android app repo.
    - If they're lost, every app has to be reinstalled.
 2. **Workflow sharing.** On GitHub, open `qawalah/devstore` → **Settings →
    Actions → General → Access** and choose **"Accessible from repositories
