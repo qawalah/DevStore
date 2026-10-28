@@ -5,14 +5,26 @@ Writes a heartbeat line every 5 seconds to
 SIGINT / SIGTERM / SIGBREAK (what WinSW sends when stopping the service).
 """
 import datetime
+import json
 import os
 import signal
+import sys
 import threading
 from pathlib import Path
 
 NAME = "hello-windows-service"
-VERSION = "1.0.0"
 stop = threading.Event()
+
+
+def app_version() -> str:
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+    try:
+        return json.loads((base / "devstore.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        return "?"
+
+
+VERSION = app_version()
 
 
 def data_dir() -> Path:
