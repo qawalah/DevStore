@@ -1,0 +1,6 @@
+{
+  "name": "hello-windows-service",
+  "type": "service",
+  "entry": "main.py",
+  "version": "1.0.0"
+}

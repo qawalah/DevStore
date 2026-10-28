@@ -1,0 +1,6 @@
+{
+  "name": "hello-windows-gui",
+  "type": "gui",
+  "entry": "main.py",
+  "version": "1.0.0"
+}

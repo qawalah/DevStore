@@ -1,0 +1,6 @@
+{
+  "name": "my-app",
+  "type": "gui",
+  "entry": "src/main.py",
+  "version": "1.0.0"
+}
