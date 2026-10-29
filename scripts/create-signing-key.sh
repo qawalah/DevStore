@@ -25,6 +25,8 @@ else
 fi
 [ "${#PASS}" -ge 8 ] || { echo "Password must be at least 8 characters" >&2; exit 1; }
 
+if [ -n "$GENERATED" ]; then SHOWN_PASS="$PASS"; else SHOWN_PASS="(the password you just typed)"; fi
+
 keytool -genkeypair -alias devstore -keyalg RSA -keysize 4096 -validity 10950 \
   -dname "CN=DevStore" -keystore "$OUT" -storetype JKS \
   -storepass "$PASS" -keypass "$PASS" 2>/dev/null
@@ -36,7 +38,7 @@ Created $OUT (alias: devstore, valid 30 years).
 Add these two secrets to EVERY app repo
 (GitHub -> repo -> Settings -> Secrets and variables -> Actions -> New repository secret):
 
-  DEVSTORE_KEYSTORE_PASSWORD = ${GENERATED:+$PASS   (generated for you)}${GENERATED:-the password you just typed}
+  DEVSTORE_KEYSTORE_PASSWORD = $SHOWN_PASS
   DEVSTORE_KEYSTORE_B64      = the text between the lines below
 
 -----BEGIN DEVSTORE_KEYSTORE_B64-----
