@@ -13,3 +13,5 @@ dist/
 .gradle/
 local.properties
 *.apk
+
+.claude/settings.local.json
