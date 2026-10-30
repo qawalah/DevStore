@@ -84,12 +84,17 @@ jobs:
       - name: Sign APK and read version
         run: |
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          OUT="${{ inputs.module }}/build/outputs/apk/release"
-          UNSIGNED=$(ls "$OUT"/*-unsigned.apk 2>/dev/null | head -1)
+          OUT="${{ inputs.module }}/build/outputs/apk"
+          # Prefer the unsigned release APK; otherwise take whatever release APK the
+          # build made (e.g. one signed with a debug key). It is re-signed below.
+          # `|| true` keeps pipefail from aborting before our own error message.
+          UNSIGNED=$(find "$OUT" -path '*release*' -name '*-unsigned.apk' 2>/dev/null | sort | head -1 || true)
+          [ -z "$UNSIGNED" ] && UNSIGNED=$(find "$OUT" -path '*release*' -name '*.apk' 2>/dev/null | sort | head -1 || true)
           if [ -z "$UNSIGNED" ]; then
-            echo "::error::No unsigned release APK in $OUT. Remove any release signingConfig from build.gradle; DevStore signs in CI."
+            echo "::error::No release APK found under $OUT. Contents: $(find "$OUT" -type f 2>/dev/null | tr '\n' ' ')"
             exit 1
           fi
+          echo "Signing $UNSIGNED"
           "$BT/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/aligned.apk"
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/devstore.jks" --ks-key-alias devstore \
             --ks-pass env:KS_PASS --key-pass env:KS_PASS \
