@@ -241,8 +241,44 @@ function Select-DevStoreStoreAssets {
     return @{ meta = $meta; icon = $icon; screenshots = $shots }
 }
 
+function Select-DevStoreRepoStoreFiles {
+    # Picks an icon and up to 6 screenshots from a repo's file list (git tree
+    # paths), for releases that don't carry store files. Looks next to the
+    # app's devstore.json first, then at the repo root.
+    param([string[]]$Paths)
+    $Paths = @($Paths)
+    $manifest = @($Paths | Where-Object { $_ -match '(^|/)devstore\.json$' } | Sort-Object { $_.Length }) | Select-Object -First 1
+    $app = ''
+    if ($manifest -and $manifest -match '/') { $app = $manifest.Substring(0, $manifest.LastIndexOf('/') + 1) }
+    $prefixes = @($app)
+    if ($app) { $prefixes += '' }
+    $shots = @()
+    foreach ($pre in $prefixes) {
+        foreach ($d in 'store/screenshots/', 'screenshots/', 'docs/screenshots/', 'store/') {
+            if ($shots.Count) { break }
+            $dir = "$pre$d"
+            $shots = @($Paths | Where-Object {
+                    $_.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) -and $_ -match '\.png$' -and
+                    $_.Substring($dir.Length) -notmatch '/' -and $_.Substring($dir.Length) -notmatch '^icon'
+                } | Sort-Object)
+        }
+    }
+    $icon = $null
+    foreach ($pre in $prefixes) {
+        foreach ($c in 'store/icon.png', 'icon.png', 'assets/icon.png', 'winres/icon.png') {
+            if (-not $icon) { $icon = @($Paths | Where-Object { $_ -ieq "$pre$c" }) | Select-Object -First 1 }
+        }
+    }
+    if (-not $icon) {
+        $under = @($Paths | Where-Object { $_.StartsWith($app, [StringComparison]::OrdinalIgnoreCase) -and $_ -match '(^|/)icon[^/]*\.png$' })
+        $icon = @($under | Where-Object { $_ -match 'icon-512\.png$' }) + @($under | Where-Object { $_ -match 'icon-256\.png$' }) + $under |
+            Select-Object -First 1
+    }
+    return @{ icon = $icon; screenshots = @($shots | Select-Object -First 6) }
+}
+
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
     ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets, Get-DevStoreUpdateMode, Set-DevStoreConfigUpdates,
-    ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry
+    ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry, Select-DevStoreRepoStoreFiles

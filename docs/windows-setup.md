@@ -54,7 +54,9 @@ Open **DevStore** from the Start menu.
 
 To give an app an icon, description and screenshots in the store, add them
 to its `devstore.json` (see the app repo's `CLAUDE.md`), or just put PNGs in
-the repo's `store/`, `screenshots/` or `docs/screenshots/` folder.
+the repo's `store/`, `screenshots/` or `docs/screenshots/` folder (next to
+`devstore.json`, or at the repo root). DevStore finds them by itself, even for
+apps released before you added them.
 
 ### Update settings
 In **Settings → Updates**, choose what happens when an app has a new version.

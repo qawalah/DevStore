@@ -92,6 +92,28 @@ function Get-DevStoreReleases {
     }
 }
 
+function Get-DevStoreRepoTree {
+    # Every file path in the repo at a tag (one API call).
+    param([string]$Repo, [string]$Ref, [string]$Token)
+    Initialize-DevStoreHttp
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = $script:UserAgent }
+    $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/git/trees/$([uri]::EscapeDataString($Ref))?recursive=1" `
+        -Headers $headers -Method Get -UseBasicParsing
+    $paths = New-Object System.Collections.ArrayList
+    foreach ($e in $resp.tree) { if ($e.type -eq 'blob') { [void]$paths.Add([string]$e.path) } }
+    return $paths.ToArray()
+}
+
+function Save-DevStoreRepoFile {
+    # Downloads one file from the repo at a tag.
+    param([string]$Repo, [string]$Path, [string]$Ref, [string]$Token, [string]$OutFile)
+    Initialize-DevStoreHttp
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github.raw'; 'User-Agent' = $script:UserAgent }
+    $escaped = ($Path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+    Invoke-WebRequest -Uri "https://api.github.com/repos/$Repo/contents/$escaped`?ref=$([uri]::EscapeDataString($Ref))" `
+        -Headers $headers -OutFile $OutFile -UseBasicParsing
+}
+
 function Save-DevStoreAsset {
     # Private release assets redirect to a signed storage URL. Windows
     # PowerShell 5.1 forwards the Authorization header on redirects, which the
@@ -584,7 +606,8 @@ function Update-DevStoreCatalog {
                 description = [string]$repoInfo.description; icon = $null; screenshots = @()
                 publishedAt = [string]$release.published_at
             }
-            if ($prev -and $prev['latest'] -eq $version -and (Test-Path -LiteralPath $cacheDir)) {
+            # storeVersion 2: listings may also take pictures from the repo itself.
+            if ($prev -and $prev['latest'] -eq $version -and $prev['storeVersion'] -ge 2 -and (Test-Path -LiteralPath $cacheDir)) {
                 foreach ($k in 'displayName', 'description', 'type', 'icon', 'screenshots') { $entry[$k] = $prev[$k] }
             }
             else {
@@ -609,8 +632,28 @@ function Update-DevStoreCatalog {
                     Save-DevStoreAsset -Repo $repo -AssetId $a.id -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
                     $shots += "$cacheRel\screenshot-$i.png"
                 }
+                # No pictures in the release (e.g. built before DevStore attached them):
+                # take them from the repo at this release's tag.
+                if (-not $entry['icon'] -or $shots.Count -eq 0) {
+                    try {
+                        $picked = Select-DevStoreRepoStoreFiles -Paths @(Get-DevStoreRepoTree -Repo $repo -Ref $release.tag_name -Token $Token)
+                        if (-not $entry['icon'] -and $picked['icon']) {
+                            Save-DevStoreRepoFile -Repo $repo -Path $picked['icon'] -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
+                            $entry['icon'] = "$cacheRel\icon.png"
+                        }
+                        if ($shots.Count -eq 0) {
+                            foreach ($p in @($picked['screenshots'])) {
+                                $i++
+                                Save-DevStoreRepoFile -Repo $repo -Path $p -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
+                                $shots += "$cacheRel\screenshot-$i.png"
+                            }
+                        }
+                    }
+                    catch { Write-DevStoreLog -Root $Root -App $repo -Message "couldn't read store pictures from the repo: $($_.Exception.Message)" }
+                }
                 $entry['screenshots'] = $shots
             }
+            $entry['storeVersion'] = 2
             $apps[$repo] = $entry
         }
         catch {
@@ -765,7 +808,7 @@ function Invoke-DevStoreUpdaterRun {
 
 Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
     Read-DevStoreTokens, Write-DevStoreTokens,
-    Remove-DevStoreAppCore, Invoke-DevStoreRequests, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
+    Remove-DevStoreAppCore, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,

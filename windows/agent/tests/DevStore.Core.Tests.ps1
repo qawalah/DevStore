@@ -247,3 +247,29 @@ Describe 'Update modes' {
         ConvertFrom-DevStoreRequest @{ action = 'set-updates'; repo = 'qawalah/a'; mode = 'sometimes' } | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Select-DevStoreRepoStoreFiles' {
+    It 'finds screenshots next to devstore.json first (SimDeck layout)' {
+        $paths = @('windows/devstore.json', 'docs/images/play.png') + (1..8 | ForEach-Object { 'windows/docs/screenshots/{0:D2}-x.png' -f $_ })
+        $r = Select-DevStoreRepoStoreFiles -Paths $paths
+        @($r.screenshots).Count | Should -Be 6
+        $r.screenshots[0] | Should -Be 'windows/docs/screenshots/01-x.png'
+    }
+    It 'finds an icon in common places (Werd layout)' {
+        $paths = @('server/devstore.json', 'server/web/app/icon-192.png', 'server/web/app/icon-512.png', 'server/winres/icon.png')
+        (Select-DevStoreRepoStoreFiles -Paths $paths).icon | Should -Be 'server/winres/icon.png'
+        (Select-DevStoreRepoStoreFiles -Paths @('server/devstore.json', 'server/web/app/icon-192.png', 'server/web/app/icon-512.png')).icon |
+            Should -Be 'server/web/app/icon-512.png'
+    }
+    It 'falls back to the repo root and skips icons in screenshot folders' {
+        $paths = @('devstore.json', 'screenshots/icon.png', 'screenshots/b.png', 'screenshots/a.png', 'store/icon.png')
+        $r = Select-DevStoreRepoStoreFiles -Paths $paths
+        $r.icon | Should -Be 'store/icon.png'
+        @($r.screenshots) | Should -Be @('screenshots/a.png', 'screenshots/b.png')
+    }
+    It 'returns nothing for a repo without pictures' {
+        $r = Select-DevStoreRepoStoreFiles -Paths @('devstore.json', 'main.py')
+        $r.icon | Should -BeNullOrEmpty
+        @($r.screenshots).Count | Should -Be 0
+    }
+}
