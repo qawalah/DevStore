@@ -9,10 +9,12 @@ ROOT = Path(r"C:\DevStore")
 TOKEN_PREFIXES = ("github_pat_", "ghp_")
 
 
-def validate_token(token: str, already_installed: bool) -> Optional[str]:
+def validate_token(token: str, already_installed: bool, add_account: bool = False) -> Optional[str]:
     """None if OK; otherwise a message for the user. Empty is OK only when a token is already stored."""
     t = token.strip()
     if not t:
+        if add_account:
+            return "Paste the other account's token first."
         return None if already_installed else "Paste your GitHub token first."
     if any(c.isspace() for c in t):
         return "The token can't contain spaces."
@@ -34,12 +36,15 @@ def install_command(script_dir: Path) -> list[str]:
             "-File", str(script_dir / "Install-DevStoreAgent.ps1")]
 
 
-def child_env(base: dict, token: str) -> dict:
+def child_env(base: dict, token: str, add_account: bool = False) -> dict:
     """The token goes to the install script through the environment, never the command line."""
     env = dict(base)
     env.pop("DEVSTORE_TOKEN", None)
+    env.pop("DEVSTORE_TOKEN_MODE", None)
     if token.strip():
         env["DEVSTORE_TOKEN"] = token.strip()
+        if add_account:
+            env["DEVSTORE_TOKEN_MODE"] = "add"
     return env
 
 

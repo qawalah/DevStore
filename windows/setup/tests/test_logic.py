@@ -45,3 +45,14 @@ def test_summarize():
 
 def test_payload_dir_in_development():
     assert (logic.payload_dir() / "Install-DevStoreAgent.ps1").exists()
+
+
+def test_child_env_add_account_mode():
+    env = logic.child_env({}, "github_pat_x", add_account=True)
+    assert env["DEVSTORE_TOKEN_MODE"] == "add"
+    env = logic.child_env({"DEVSTORE_TOKEN_MODE": "add"}, "github_pat_x")
+    assert "DEVSTORE_TOKEN_MODE" not in env
+
+
+def test_add_account_needs_a_token():
+    assert logic.validate_token("", already_installed=True, add_account=True) == "Paste the other account's token first."

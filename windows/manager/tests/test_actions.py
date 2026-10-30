@@ -136,3 +136,19 @@ def test_force_close_a_real_running_app(tmp_path, monkeypatch):
     finally:
         if p.poll() is None:
             p.kill()
+
+
+def test_apply_update_and_set_update_modes(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.apply_update("qawalah/t")
+    actions.set_updates("qawalah/t", "notify")
+    actions.set_updates(None, "download")
+    bodies = [json.loads(f.read_text()) for f in sorted((root / "requests").glob("*.json"))]
+    assert {"action": "apply", "repo": "qawalah/t"} in bodies
+    assert {"action": "set-updates", "repo": "qawalah/t", "mode": "notify"} in bodies
+    assert {"action": "set-updates", "mode": "download"} in bodies
+    with pytest.raises(ValueError):
+        actions.set_updates("qawalah/t", "sometimes")
+    with pytest.raises(ValueError):
+        actions.set_updates(None, "default")

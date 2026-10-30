@@ -33,8 +33,8 @@ class SetupWindow(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("DevStore Setup")
-        self.geometry("620x480")
-        self.minsize(520, 420)
+        self.geometry("640x560")
+        self.minsize(540, 500)
         style = ttk.Style(self)
         if "vista" in style.theme_names():
             style.theme_use("vista")
@@ -64,6 +64,14 @@ class SetupWindow(tk.Tk):
         if self.installed:
             hint += " DevStore is already installed: leave this empty to keep the current token."
         ttk.Label(body, text=hint, style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w")
+        self.add_var = tk.BooleanVar(value=False)
+        if self.installed:
+            ttk.Checkbutton(body, variable=self.add_var, text=(
+                "Add as another GitHub account (for apps in someone else's repos, "
+                "using a token they created for you)")).pack(anchor="w", pady=(8, 0))
+        ttk.Label(body, style="Muted.TLabel", wraplength=560, justify="left", text=(
+            f"Apps install to {logic.ROOT}\\apps. Their data stays in C:\\ProgramData\\<app name>, "
+            "and is kept if an app is removed.")).pack(anchor="w", pady=(10, 0))
 
         row = ttk.Frame(body)
         row.pack(fill="x", pady=(14, 8))
@@ -89,7 +97,8 @@ class SetupWindow(tk.Tk):
         if str(self.install_btn["state"]) == "disabled":
             return
         token = self.token_var.get()
-        error = logic.validate_token(token, self.installed)
+        add = bool(self.add_var.get())
+        error = logic.validate_token(token, self.installed, add)
         if error:
             self.status.configure(text=error, style="Error.TLabel")
             self.token_entry.focus_set()
@@ -97,13 +106,13 @@ class SetupWindow(tk.Tk):
         self.install_btn.state(["disabled"])
         self.token_entry.state(["disabled"])
         self.status.configure(text="Installing… this takes about a minute.", style="TLabel")
-        threading.Thread(target=self._run, args=(token,), daemon=True).start()
+        threading.Thread(target=self._run, args=(token, add), daemon=True).start()
 
-    def _run(self, token: str) -> None:
+    def _run(self, token: str, add: bool = False) -> None:
         lines: list[str] = []
         try:
             proc = subprocess.Popen(
-                logic.install_command(logic.payload_dir()), env=logic.child_env(os.environ, token),
+                logic.install_command(logic.payload_dir()), env=logic.child_env(os.environ, token, add),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                 text=True, errors="replace", creationflags=_CREATE_NO_WINDOW)
             assert proc.stdout is not None

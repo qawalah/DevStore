@@ -94,9 +94,10 @@ def start_updater() -> bool:
         return False
 
 
-def _write_request(action: str, repo: str | None = None) -> None:
+def _write_request(action: str, repo: str | None = None, **extra: str) -> None:
     folder = ROOT / "requests"
     body = {"action": action} if repo is None else {"action": action, "repo": repo}
+    body.update(extra)
     name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
     tmp = folder / f"{name}.tmp"
     tmp.write_text(json.dumps(body), encoding="utf-8")
@@ -132,6 +133,27 @@ def remove(repo: str) -> None:
     if not REPO_RE.match(repo):
         raise ValueError(f"Can't remove {repo!r}.")
     _write_request("remove", repo)
+    start_updater()
+
+
+def apply_update(repo: str) -> None:
+    """Install a waiting update now (for apps set to 'download only' or 'notify only')."""
+    if not REPO_RE.match(repo):
+        raise ValueError(f"Can't update {repo!r}.")
+    _write_request("apply", repo)
+    start_updater()
+
+
+UPDATE_MODES = ("auto", "download", "notify")
+
+
+def set_updates(repo: str | None, mode: str) -> None:
+    """An app's update mode ('default' = follow the default), or the default when repo is None."""
+    if mode not in UPDATE_MODES + (("default",) if repo else ()):
+        raise ValueError(f"Unknown update setting {mode!r}.")
+    if repo is not None and not REPO_RE.match(repo):
+        raise ValueError(f"Can't change {repo!r}.")
+    _write_request("set-updates", repo, mode=mode)
     start_updater()
 
 

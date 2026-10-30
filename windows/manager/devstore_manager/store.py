@@ -7,6 +7,7 @@ import re
 from typing import Any, Optional
 
 SELF_NAME = "devstore-manager"
+UPDATE_MODES = ("auto", "download", "notify")
 STALE_AFTER = dt.timedelta(minutes=30)
 _LOG_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \[(.*?)\] (.*)$")
 
@@ -98,6 +99,10 @@ def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service:
         return st("busy", "Installing…")
     if status == "pending":
         return st("warn", "Update ready: close the app to finish", short="Close the app to update")
+    if status == "available":
+        return st("update", f"Update available: {s.get('latest', '?')}", short="New version")
+    if status == "ready":
+        return st("update", f"Update downloaded: {s.get('latest', '?')}, ready to install", short="Downloaded")
     if s.get("restartPending"):
         return st("warn", f"Updated to {installed}: restart the app to use it", short="Restart to update")
     latest = s.get("latest")
@@ -123,7 +128,7 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
         return ["install"]
     if not s or not s.get("installed"):
         return [] if is_self else ["remove"]
-    acts = []
+    acts = ["update"] if s.get("status") in ("available", "ready") else []
     if s.get("type") == "service":
         if service == "Running":
             acts += ["stop", "restart"]
@@ -153,8 +158,11 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
     states = _by_repo(state.get("apps"))
     cat = _by_repo((catalog or {}).get("apps") if isinstance(catalog, dict) else None)
     entries = config.get("apps") if isinstance(config, dict) else None
-    configured = {str(e["repo"]).lower(): str(e["repo"]) for e in (entries if isinstance(entries, list) else [])
-                  if isinstance(e, dict) and e.get("repo")}
+    entries = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and e.get("repo")]
+    configured = {str(e["repo"]).lower(): str(e["repo"]) for e in entries}
+    modes = {str(e["repo"]).lower(): e.get("updates") for e in entries if e.get("updates") in UPDATE_MODES}
+    default_mode = config.get("defaultUpdates") if isinstance(config, dict) else None
+    default_mode = default_mode if default_mode in UPDATE_MODES else "auto"
     pend = {str(k).lower(): v for k, v in (pending or {}).items()}
 
     apps = []
@@ -176,13 +184,17 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "type": {"gui": "App", "service": "Service"}.get(app_type, ""),
             "installed": bool(in_config and s and s.get("installed")),
             "installedVersion": (s or {}).get("installed") or "",
-            "latest": c.get("latest") or (s or {}).get("latest") or "",
+            "latest": max([v for v in (c.get("latest"), (s or {}).get("latest")) if v], key=_version, default=""),
             "status": status,
             "actions": _actions(s, in_config, pend.get(key), service, is_self, is_running),
             "running": is_running,
             "icon": c.get("icon"),
             "screenshots": c.get("screenshots") or [],
             "isSelf": is_self,
+            "shared": bool(c.get("shared")),
+            "owner": c.get("owner") or repo.split("/")[0],
+            "updates": modes.get(key, default_mode),
+            "updatesIsDefault": key not in modes,
             "exe": (s or {}).get("exe") or f"{name}.exe",
             "lastChecked": (s or {}).get("lastChecked") or "",
             "error": (s or {}).get("lastError") or "",
@@ -201,6 +213,12 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         "counts": {
             "installed": sum(1 for a in apps if a["installed"] and not a["isSelf"]),
             "attention": sum(1 for a in apps if a["status"]["kind"] == "error"),
+            "updates": sum(1 for a in apps if a["status"]["kind"] == "update"),
+            "shared": sum(1 for a in apps if a["shared"]),
+        },
+        "settings": {
+            "defaultUpdates": default_mode,
+            "accounts": [str(x) for x in (state.get("accounts") or []) if x],
         },
     }
 
