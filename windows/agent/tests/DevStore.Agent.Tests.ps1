@@ -8,11 +8,13 @@ BeforeAll {
     # Builds a release zip + .sha256 the way windows-release.yml does, and
     # returns a fake GitHub release object pointing at them.
     function New-FakeRelease {
-        param([string]$Name, [string]$Version, [string]$Type, [switch]$BadHash, [switch]$NoSha)
+        param([string]$Name, [string]$Version, [string]$Type, [switch]$BadHash, [switch]$NoSha, [switch]$UpdateWhileRunning)
         $src = Join-Path $TestDrive "src-$Name-$Version"
         New-Item -ItemType Directory -Path $src -Force | Out-Null
         Set-Content -Path (Join-Path $src "$Name.exe") -Value "fake exe $Version"
-        @{ name = $Name; type = $Type; entry = 'main.py'; version = $Version } | ConvertTo-Json |
+        $manifest = @{ name = $Name; type = $Type; entry = 'main.py'; version = $Version }
+        if ($UpdateWhileRunning) { $manifest.updateWhileRunning = $true }
+        $manifest | ConvertTo-Json |
             Set-Content -Path (Join-Path $src 'devstore.json')
         $zipName = "$Name-$Version-win-x64.zip"
         $zip = Join-Path $script:Fixtures $zipName
@@ -179,6 +181,42 @@ Describe 'Update-DevStoreApp' {
         $s.status | Should -Be 'error'
         $s.lastError | Should -Match '401'
         $s.lastChecked | Should -Not -BeNullOrEmpty
+    }
+
+    It 'remembers updateWhileRunning from the installed build' {
+        $rel = New-FakeRelease -Name 'tray' -Version '1.0.0' -Type 'gui' -UpdateWhileRunning
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/tray' -AppState $null -Root $Root -Token 't'
+
+        $s.updateWhileRunning | Should -BeTrue
+    }
+
+    It 'updates a running tray app that opted in, and flags a restart' {
+        $rel = New-FakeRelease -Name 'tray' -Version '1.1.0' -Type 'gui' -UpdateWhileRunning
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        foreach ($v in '0.9.0', '1.0.0') { New-Item -ItemType Directory -Path (P $Root apps tray versions $v) -Force | Out-Null }
+        $state = @{ name = 'tray'; type = 'gui'; exe = 'tray.exe'; installed = '1.0.0'; previous = '0.9.0'; bad = @(); status = 'ok'; updateWhileRunning = $true }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/tray' -AppState $state -Root $Root -Token 't'
+
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be '1.1.0'
+        $s.restartPending | Should -BeTrue
+        $script:Junctions[(P $Root apps tray current)] | Should -Be (P $Root apps tray versions 1.1.0)
+        # Nothing is deleted while the app runs: it may still use an older folder.
+        (Get-ChildItem (P $Root apps tray versions)).Name | Sort-Object | Should -Be @('0.9.0', '1.0.0', '1.1.0')
+    }
+
+    It 'clears the restart flag once the app is closed' {
+        $rel = New-FakeRelease -Name 'tray' -Version '1.1.0' -Type 'gui' -UpdateWhileRunning
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        $state = @{ name = 'tray'; type = 'gui'; exe = 'tray.exe'; installed = '1.1.0'; bad = @(); status = 'ok'; updateWhileRunning = $true; restartPending = $true }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/tray' -AppState $state -Root $Root -Token 't'
+
+        $s.restartPending | Should -BeFalse
     }
 
     It 'prunes versions older than current and previous' {

@@ -239,6 +239,9 @@ function Copy-DevStoreAppState {
     foreach ($k in 'name', 'type', 'exe', 'displayName', 'installed', 'previous', 'latest', 'status', 'lastError') {
         if (-not $s.ContainsKey($k)) { $s[$k] = $null }
     }
+    foreach ($k in 'updateWhileRunning', 'restartPending') {
+        $s[$k] = [bool]($s.ContainsKey($k) -and $s[$k])
+    }
     return $s
 }
 
@@ -262,6 +265,9 @@ function Update-DevStoreApp {
         $action = Get-DevStoreAction -AppState $s -Version $version
         if ($action -eq 'none') {
             if ($s['status'] -ne 'rolledback') { $s['status'] = 'ok'; $s['lastError'] = $null }
+            if ($s['restartPending'] -and $s['name']) {
+                $s['restartPending'] = Test-DevStoreGuiRunning -AppDir (Join-DevStorePath $Root 'apps' $s['name'])
+            }
             return $s
         }
 
@@ -275,7 +281,10 @@ function Update-DevStoreApp {
         $logName = $name
         $appDir = Join-DevStorePath $Root 'apps' $name
 
-        if ($action -eq 'update' -and $s['type'] -eq 'gui' -and (Test-DevStoreGuiRunning -AppDir $appDir)) {
+        # Tray/background GUI apps can opt in to updating while they run
+        # ("updateWhileRunning" in devstore.json): the new version starts next launch.
+        $running = ($action -eq 'update' -and $s['type'] -eq 'gui' -and (Test-DevStoreGuiRunning -AppDir $appDir))
+        if ($running -and -not $s['updateWhileRunning']) {
             if ($s['status'] -ne 'pending') { Write-DevStoreLog -Root $Root -App $name -Message "v$version waiting for the app to close" }
             $s['status'] = 'pending'
             return $s
@@ -350,18 +359,26 @@ function Update-DevStoreApp {
                 Set-DevStoreJunction -Link $current -Target $target
                 New-DevStoreShortcut -DisplayName $displayName -Target (Join-DevStorePath $current $exe)
             }
-            Write-DevStoreLog -Root $Root -App $name -Message "updated v$old -> v$version"
+            if ($running) {
+                Write-DevStoreLog -Root $Root -App $name -Message "updated v$old -> v$version (app is running; the new version starts next time it's opened)"
+            }
+            else {
+                Write-DevStoreLog -Root $Root -App $name -Message "updated v$old -> v$version"
+            }
         }
 
         $s['name'] = $name
         $s['type'] = $type
         $s['exe'] = $exe
         $s['displayName'] = $displayName
+        $s['updateWhileRunning'] = [bool]($manifest.ContainsKey('updateWhileRunning') -and $manifest['updateWhileRunning'])
+        $s['restartPending'] = [bool]$running
         $s['previous'] = $old
         $s['installed'] = $version
         $s['status'] = 'ok'
         $s['lastError'] = $null
 
+        if ($running) { return $s }   # never delete old folders while the app may still use one
         $existing = @(Get-ChildItem -LiteralPath $versionsDir -Directory | ForEach-Object { $_.Name })
         foreach ($v in (Get-DevStorePruneList -Versions $existing -Current $version -Previous $old)) {
             Remove-Item -LiteralPath (Join-DevStorePath $versionsDir $v) -Recurse -Force -ErrorAction SilentlyContinue
