@@ -543,7 +543,10 @@ function Update-DevStoreCatalog {
     $apps = @{}
     $Tokens = @($Tokens)
     $main = $Tokens[0]['login']
-    if (-not $main) { $main = Get-DevStoreLogin -Token $Tokens[0]['token'] }
+    if (-not $main) {
+        # Unknown main account (older token entry, or a token that can't read /user): nothing is marked shared.
+        try { $main = Get-DevStoreLogin -Token $Tokens[0]['token'] } catch { $main = $null }
+    }
     # Each repo is read with the first account that can see it.
     $seen = New-Object System.Collections.ArrayList
     foreach ($account in $Tokens) {
@@ -576,7 +579,7 @@ function Update-DevStoreCatalog {
             $prev = Select-DevStoreHashtable $oldApps[$repo]
             $store = Select-DevStoreStoreAssets $release
             $entry = @{
-                repo = $repo; owner = $owner; shared = [bool]($owner -ine $main)
+                repo = $repo; owner = $owner; shared = [bool]($main -and $owner -ine $main)
                 name = $name; displayName = $name; latest = $version; type = $null
                 description = [string]$repoInfo.description; icon = $null; screenshots = @()
                 publishedAt = [string]$release.published_at

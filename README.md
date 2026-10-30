@@ -11,8 +11,10 @@ version, it installs itself on your devices:
   - **services** restart, and roll back automatically if the new version
     fails.
 
-  The **DevStore Manager** window shows what's installed and lets you add,
-  remove and control apps.
+  The **DevStore** window is your app store. It finds the Windows apps in
+  your GitHub (and repos shared with you), shows icons and screenshots,
+  installs them, keeps them updated (automatically, or when you choose),
+  and updates itself.
 
 ```
 Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Release ──▶ Obtainium (phone)

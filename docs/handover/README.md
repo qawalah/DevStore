@@ -102,3 +102,18 @@ paste it straight into the secret:
 
 Never upload the keystore file to a repo or into a chat. If the alias is
 wrong, the Release run stops and lists the key names it found.
+
+## Shared repos (co-developing with someone else)
+
+A repo owned by another person's account works too, with three differences:
+
+1. **DevStore must be public.** Repos owned by other accounts can only use
+   DevStore's build workflows if `qawalah/DevStore` is public. It contains
+   no secrets.
+2. **Use a separate signing key** for the shared app's Android build.
+   Anyone who can push to a repo can read its secrets through a workflow, so
+   never put your main DevStore key there. Run `scripts/create-signing-key.sh`
+   again for a new key. The repo's owner adds the secrets.
+3. **Access on your PC:** the owner creates a read-only token for you, and you
+   add it in `DevStoreSetup.exe` with **Add as another GitHub account** (see
+   `docs/windows-setup.md`).
