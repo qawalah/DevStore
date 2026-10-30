@@ -209,6 +209,28 @@ Describe 'Update-DevStoreApp' {
         (Get-ChildItem (P $Root apps tray versions)).Name | Sort-Object | Should -Be @('0.9.0', '1.0.0', '1.1.0')
     }
 
+    It 'records when an update was installed while the app was running' {
+        $rel = New-FakeRelease -Name 'tray' -Version '1.1.0' -Type 'gui' -UpdateWhileRunning
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        $state = @{ name = 'tray'; type = 'gui'; exe = 'tray.exe'; installed = '1.0.0'; bad = @(); status = 'ok'; updateWhileRunning = $true }
+        $s = Update-DevStoreApp -Repo 'qawalah/tray' -AppState $state -Root $Root -Token 't'
+        $s.restartPending | Should -BeTrue
+        $s.updatedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'clears the restart flag once the app was reopened, even though it is running' {
+        $rel = New-FakeRelease -Name 'tray' -Version '1.1.0' -Type 'gui' -UpdateWhileRunning
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        Mock -ModuleName DevStore.Agent Test-DevStoreOldProcessRunning { $false }
+        $state = @{ name = 'tray'; type = 'gui'; exe = 'tray.exe'; installed = '1.1.0'; bad = @(); status = 'ok'
+            updateWhileRunning = $true; restartPending = $true; updatedAt = '2026-10-30T15:36:53Z' }
+        (Update-DevStoreApp -Repo 'qawalah/tray' -AppState $state -Root $Root -Token 't').restartPending | Should -BeFalse
+        Mock -ModuleName DevStore.Agent Test-DevStoreOldProcessRunning { $true }
+        (Update-DevStoreApp -Repo 'qawalah/tray' -AppState $state -Root $Root -Token 't').restartPending | Should -BeTrue
+    }
+
     It 'clears the restart flag once the app is closed' {
         $rel = New-FakeRelease -Name 'tray' -Version '1.1.0' -Type 'gui' -UpdateWhileRunning
         Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }

@@ -213,3 +213,14 @@ def test_latest_is_the_newest_known_version():
     st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.0.0", "latest": "1.10.0", "status": "ready"}}}
     v = view(config={"apps": [{"repo": "qawalah/t"}]}, state=st, cat=catalog(**{"qawalah/t": {"latest": "1.9.0"}}))
     assert app(v, "qawalah/t")["latest"] == "1.10.0"
+
+
+def test_devstore_running_the_installed_version_is_not_waiting_for_a_restart():
+    st = {"apps": {"qawalah/DevStore": {"name": "devstore-manager", "type": "gui", "installed": "2.1.0",
+                                        "status": "ok", "restartPending": True}}}
+    cfg = {"apps": [{"repo": "qawalah/DevStore"}]}
+    me = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"devstore-manager"}, self_version="2.1.0"), "qawalah/DevStore")
+    assert me["status"]["text"] == "Running · up to date"
+    assert "relaunch" not in me["actions"]
+    old = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"devstore-manager"}, self_version="2.0.2"), "qawalah/DevStore")
+    assert old["status"]["text"].startswith("Updated to 2.1.0")

@@ -178,6 +178,22 @@ function Test-DevStoreGuiRunning {
     return [bool]$running
 }
 
+function Test-DevStoreOldProcessRunning {
+    # True if a process from the app's folder started before $Since (UTC ISO time),
+    # i.e. an old copy that hasn't been restarted since an update.
+    param([string]$AppDir, [string]$Since)
+    $cut = [datetime]::Parse($Since, [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+    $prefix = $AppDir.TrimEnd('\') + '\'
+    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+        $path = $null; $start = $null
+        try { $path = $p.Path; $start = $p.StartTime } catch { }
+        if ($path -and $start -and $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
+            $start.ToUniversalTime() -lt $cut) { return $true }
+    }
+    return $false
+}
+
 function New-DevStoreShortcut {
     param([string]$DisplayName, [string]$Target)
     $dir = Join-DevStorePath $env:ProgramData 'Microsoft' 'Windows' 'Start Menu' 'Programs' 'DevStore'
@@ -324,7 +340,12 @@ function Update-DevStoreApp {
         if ($action -eq 'none') {
             if ($s['status'] -ne 'rolledback') { $s['status'] = 'ok'; $s['lastError'] = $null }
             if ($s['restartPending'] -and $s['name']) {
-                $s['restartPending'] = Test-DevStoreGuiRunning -AppDir (Join-DevStorePath $Root 'apps' $s['name'])
+                # Still waiting only while a copy started before the update is running.
+                # (Older state has no updatedAt: drop the stale flag.)
+                $s['restartPending'] = $false
+                if ($s.ContainsKey('updatedAt') -and $s['updatedAt']) {
+                    $s['restartPending'] = Test-DevStoreOldProcessRunning -AppDir (Join-DevStorePath $Root 'apps' $s['name']) -Since $s['updatedAt']
+                }
             }
             return $s
         }
@@ -447,6 +468,7 @@ function Update-DevStoreApp {
         $s['displayName'] = $displayName
         $s['updateWhileRunning'] = [bool]($manifest.ContainsKey('updateWhileRunning') -and $manifest['updateWhileRunning'])
         $s['restartPending'] = [bool]$running
+        if ($running) { $s['updatedAt'] = Get-DevStoreTimestamp }
         $s['previous'] = $old
         $s['installed'] = $version
         $s['status'] = 'ok'
@@ -810,6 +832,6 @@ Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-D
     Read-DevStoreTokens, Write-DevStoreTokens,
     Remove-DevStoreAppCore, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
-    Test-DevStoreGuiRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
+    Test-DevStoreGuiRunning, Test-DevStoreOldProcessRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,
     Invoke-DevStoreUpdaterRun

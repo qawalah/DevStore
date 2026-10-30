@@ -49,7 +49,8 @@ class Api:
                     if a.get("type") == "service" and a.get("name")]
         self._services = actions.service_statuses(services)
         view = store.build_view(config, state, catalog, self._services, actions.pending_requests(),
-                                dt.datetime.now(dt.timezone.utc), running=actions.running_apps())
+                                dt.datetime.now(dt.timezone.utc), running=actions.running_apps(),
+                                self_version=app_version())
         for a in view["apps"]:
             a["iconData"] = self._image(a.get("icon"))
         view["settings"]["locations"] = self._locations()
