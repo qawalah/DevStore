@@ -23,7 +23,9 @@ Android app and a Windows companion, set up both.
    `CLAUDE.md` and `.gitignore`. Merge with existing files if any.
 2. In the app module's `build.gradle(.kts)`:
    - remove any release `signingConfig` and `signingConfigs` that point at a
-     keystore file (CI signs it),
+     keystore file (CI signs it). If `HANDOVER.md` says the app has its own
+     key, tell the user its alias and point them to "Using an app's own key"
+     in DevStore `docs/handover/README.md`, so installed copies keep updating,
    - **keep `applicationId` exactly as it is**,
    - bump `versionCode` by 1.
 3. Make sure `gradlew` is executable: `git update-index --chmod=+x gradlew`.
