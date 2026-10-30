@@ -40,13 +40,20 @@ Either way, the installer:
 Within a few minutes, **DevStore Manager** appears in the Start menu under
 *DevStore*.
 
-## 3. Add your apps
-In **DevStore Manager**, type `qawalah/<app>` next to "Add app" and press
-**Add**. Or, from an admin PowerShell:
-```powershell
-C:\DevStore\agent\Add-DevStoreApp.ps1 -Repo qawalah/my-app
-C:\DevStore\agent\Remove-DevStoreApp.ps1 -Repo qawalah/my-app   # data is kept
-```
+## 3. Install your apps
+Open **DevStore** from the Start menu.
+- **Discover** lists every repo in your GitHub that has a Windows release.
+  You don't need to add them one by one. New apps appear within 10 minutes
+  of their first release.
+- Click an app to see its description, screenshots and activity. Click
+  **Install**. No admin prompt is needed, and it's ready within a minute.
+- **Installed** shows what's on this PC. Anything that needs your attention
+  is listed first, in plain words.
+- **Check for updates** checks right away instead of waiting up to 10
+  minutes.
+
+To give an app an icon, description and screenshots in the store, add them
+to its `devstore.json` (see the app repo's `CLAUDE.md`).
 
 ## How updates behave
 | App type | What happens on a new version |
@@ -61,8 +68,10 @@ C:\DevStore\agent\Remove-DevStoreApp.ps1 -Repo qawalah/my-app   # data is kept
 ## Maintenance
 - **Token expired** (Manager shows HTTP 401): run `DevStoreSetup.exe` again
   and paste a new token.
-- **Upgrade the updater itself**: download the newest `DevStoreSetup.exe`
-  and run it. Apps, state and token are kept.
+- **Updating DevStore itself** happens automatically. A new DevStore
+  Manager release also carries the updated updater scripts. If DevStore
+  ever stops updating, run the newest `DevStoreSetup.exe` again; apps,
+  state and token are kept.
 - **Uninstall everything**: remove each app in the Manager, then
   `Unregister-ScheduledTask -TaskName 'DevStore Updater'` and delete
   `C:\DevStore`.

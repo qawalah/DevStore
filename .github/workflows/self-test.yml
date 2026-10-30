@@ -43,12 +43,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest -r windows/manager/requirements.txt
       - run: python -m pytest -v
         working-directory: windows/manager
-      - name: Manager imports with tkinter
+      - name: Manager window code loads on Windows
         working-directory: windows/manager
-        run: python -c "import devstore_manager.ui"
+        run: python -c "import webview, devstore_manager.ui, devstore_manager.api; print('pywebview', webview.__version__ if hasattr(webview, '__version__') else '?')"
       - name: Setup installer tests
         working-directory: windows/setup
         run: python -m pytest -v
@@ -76,3 +76,62 @@ jobs:
     with:
       working-directory: ${{ matrix.dir }}
       publish: false
+
+  e2e-windows:
+    # Real end-to-end run on a clean Windows machine, like a user's PC:
+    # install the agent with Windows PowerShell 5.1, run the updater against
+    # this repo's real releases, and check the DevStore Manager got installed.
+    name: End-to-end install (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install agent
+        env:
+          DEVSTORE_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\windows\agent\Install-DevStoreAgent.ps1 -ManagerRepo $env:GITHUB_REPOSITORY
+      - name: Run the updater once (after the task's own first run)
+        run: |
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-ScheduledTask -TaskName 'DevStore Updater').State -eq 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep 5 }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DevStore\agent\DevStoreUpdater.ps1 -Root C:\DevStore
+      - name: Show state and log
+        if: always()
+        run: |
+          Write-Output '--- config.json'; Get-Content C:\DevStore\config.json -Raw
+          Write-Output '--- state.json'; Get-Content C:\DevStore\state.json -Raw
+          Write-Output '--- logs'; Get-Content C:\DevStore\logs\updater-*.log
+      - name: Check the Manager was installed
+        run: |
+          $state = Get-Content C:\DevStore\state.json -Raw | ConvertFrom-Json
+          $app = $state.apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY } | Select-Object -First 1
+          if (-not $app) { throw "state.json has no entry for $env:GITHUB_REPOSITORY" }
+          if ($app.Value.status -ne 'ok' -or -not $app.Value.installed) { throw "Manager not installed: status=$($app.Value.status) error=$($app.Value.lastError)" }
+          if (-not (Test-Path "C:\DevStore\apps\devstore-manager\current\devstore-manager.exe")) { throw 'devstore-manager.exe missing' }
+          Write-Output "OK: devstore-manager $($app.Value.installed) installed"
+      - name: Check discovery and installing/removing without admin
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cat = Get-Content C:\DevStore\catalog.json -Raw | ConvertFrom-Json
+          $listed = $cat.apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY }
+          if (-not $listed) { Get-Content C:\DevStore\catalog.json -Raw; throw 'catalog.json does not list this repo' }
+          Write-Output "Discover lists: $($listed.Value.displayName) $($listed.Value.latest)"
+          function Invoke-Run { powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DevStore\agent\DevStoreUpdater.ps1 -Root C:\DevStore; if ($LASTEXITCODE) { throw "updater exit $LASTEXITCODE" } }
+          function Get-App { ((Get-Content C:\DevStore\state.json -Raw | ConvertFrom-Json).apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY }) }
+          # Remove via a request file, as the Manager does without admin rights.
+          @{ action = 'remove'; repo = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content C:\DevStore\requests\e2e-remove.json
+          Invoke-Run
+          if (Get-App) { throw 'app still in state after remove request' }
+          if (Test-Path C:\DevStore\apps\devstore-manager) { throw 'app folder still there after remove request' }
+          # Install again via a request file.
+          @{ action = 'install'; repo = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content C:\DevStore\requests\e2e-install.json
+          Invoke-Run
+          $app = Get-App
+          if (-not $app -or $app.Value.status -ne 'ok') { throw "reinstall failed: $($app.Value.lastError)" }
+          Write-Output 'OK: discovery, remove and install requests work'
+          Get-Content C:\DevStore\logs\updater-*.log

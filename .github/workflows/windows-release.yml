@@ -55,7 +55,21 @@ jobs:
               elseif (-not (Test-Path $i)) { $errors += "include path not found: '$i'" }
             }
           }
+          if ($m.PSObject.Properties['data']) {
+            foreach ($d in @($m.data)) {
+              if ($lang -ne 'python') { $errors += "data is for Python apps; use include for '$d'" }
+              elseif ([IO.Path]::IsPathRooted($d) -or $d -match '\.\.' -or -not (Test-Path $d)) { $errors += "data path not found or outside the folder: '$d'" }
+            }
+          }
           if ($m.PSObject.Properties['prepare'] -and $m.prepare -and -not (Test-Path $m.prepare)) { $errors += "prepare script not found: '$($m.prepare)'" }
+          # Optional store listing: "description", "icon" (PNG) and "screenshots" (PNGs, up to 6).
+          $pngs = @()
+          if ($m.PSObject.Properties['icon'] -and $m.icon) { $pngs += $m.icon }
+          if ($m.PSObject.Properties['screenshots']) { $pngs += @($m.screenshots) }
+          foreach ($f in $pngs) {
+            if ($f -notmatch '\.png$') { $errors += "icon and screenshots must be .png files (got '$f')" }
+            elseif (-not (Test-Path $f)) { $errors += "store image not found: '$f'" }
+          }
           if ($errors) { $errors | ForEach-Object { Write-Output "::error::devstore.json: $_" }; exit 1 }
           $entry = $m.entry
           if ($lang -eq 'go' -and -not $entry) { $entry = '.' }   # Go: the package to build, e.g. ./cmd/server
@@ -85,6 +99,9 @@ jobs:
           $pyiArgs = @('--noconfirm', '--clean', '--onedir', '--name', $env:APP_NAME)
           if ($env:APP_TYPE -eq 'gui') { $pyiArgs += '--noconsole' }
           if (Test-Path icon.ico) { $pyiArgs += @('--icon', 'icon.ico') }
+          # "data": folders the app reads at runtime (bundled at the same relative path).
+          $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          if ($m.PSObject.Properties['data']) { foreach ($d in @($m.data)) { $pyiArgs += @('--add-data', "$d;$d") } }
           python -m PyInstaller @pyiArgs $env:APP_ENTRY
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -151,6 +168,22 @@ jobs:
           "ZIP=$zip" >> $env:GITHUB_ENV
           Write-Output "Built $zipName ($hash)"
 
+          # Store listing files, attached to the release next to the zip.
+          $store = Join-Path $env:RUNNER_TEMP 'store'
+          New-Item -ItemType Directory -Path $store -Force | Out-Null
+          $display = $m.name
+          if ($m.PSObject.Properties['displayName'] -and $m.displayName) { $display = $m.displayName }
+          $desc = ''
+          if ($m.PSObject.Properties['description'] -and $m.description) { $desc = [string]$m.description }
+          [ordered]@{ name = $m.name; displayName = $display; description = $desc; type = $m.type; version = $m.version } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $store 'store.json') -Encoding utf8
+          if ($m.PSObject.Properties['icon'] -and $m.icon) { Copy-Item $m.icon (Join-Path $store 'store-icon.png') }
+          $n = 0
+          if ($m.PSObject.Properties['screenshots']) {
+            foreach ($f in @($m.screenshots | Select-Object -First 6)) { $n++; Copy-Item $f (Join-Path $store "store-screenshot-$n.png") }
+          }
+          "STORE_DIR=$store" >> $env:GITHUB_ENV
+
       - name: Publish GitHub Release
         if: inputs.publish
         env:
@@ -163,7 +196,8 @@ jobs:
             Write-Output "::notice::$tag already released. Bump version in devstore.json to publish a new version."
             exit 0
           }
-          gh release create $tag $env:ZIP "$($env:ZIP).sha256" --target $env:GITHUB_SHA `
+          $storeFiles = @(Get-ChildItem $env:STORE_DIR -File | ForEach-Object { $_.FullName })
+          gh release create $tag $env:ZIP "$($env:ZIP).sha256" @storeFiles --target $env:GITHUB_SHA `
             --title "Windows $($env:APP_NAME) $($env:APP_VERSION)" --notes "Built from $($env:GITHUB_SHA.Substring(0,7)) by DevStore."
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output "::notice::Published $tag"
