@@ -232,6 +232,46 @@ Describe 'Update-DevStoreApp' {
         Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 0
     }
 
+    It 'notify mode: only reports that an update exists' {
+        $rel = New-FakeRelease -Name 'hello' -Version '1.1.0' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        $state = @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.0.0'; bad = @(); status = 'ok' }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $state -Root $Root -Token 't' -Mode 'notify'
+
+        $s.status | Should -Be 'available'
+        $s.latest | Should -Be '1.1.0'
+        $s.installed | Should -Be '1.0.0'
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 0
+    }
+
+    It 'download mode: downloads once, waits, then installs when asked' {
+        $rel = New-FakeRelease -Name 'hello' -Version '1.1.0' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        $state = @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.0.0'; bad = @(); status = 'ok' }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $state -Root $Root -Token 't' -Mode 'download'
+        $s.status | Should -Be 'ready'
+        $s.installed | Should -Be '1.0.0'
+        Test-Path (P $Root apps hello versions 1.1.0 hello.exe) | Should -BeTrue
+        Should -Invoke -ModuleName DevStore.Agent Set-DevStoreJunction -Times 0
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $s -Root $Root -Token 't' -Mode 'download'
+        $s.status | Should -Be 'ready'
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $s -Root $Root -Token 't' -Mode 'download' -Apply
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be '1.1.0'
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 2 -Exactly
+    }
+
+    It 'a first install happens whatever the update mode' {
+        $rel = New-FakeRelease -Name 'hello' -Version '1.0.0' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $null -Root $Root -Token 't' -Mode 'notify'
+        $s.installed | Should -Be '1.0.0'
+    }
+
     It 'prunes versions older than current and previous' {
         foreach ($v in '0.8.0', '0.9.0', '1.0.0') {
             New-Item -ItemType Directory -Path (P $Root apps hello versions $v) -Force | Out-Null
@@ -251,7 +291,7 @@ Describe 'Invoke-DevStoreUpdaterRun' {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
         Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @(@{ repo = 'qawalah/a' }, @{ repo = 'qawalah/b' }) }
-        Mock -ModuleName DevStore.Agent Read-DevStoreToken { 'token' }
+        Mock -ModuleName DevStore.Agent Read-DevStoreTokens { @(@{ login = 'qawalah'; token = 'token' }) }
         Mock -ModuleName DevStore.Agent Initialize-DevStoreLayout {}
         Mock -ModuleName DevStore.Agent Update-DevStoreCatalog {}
         Mock -ModuleName DevStore.Agent Update-DevStoreAgentFiles { $false }
@@ -300,7 +340,7 @@ Describe 'Invoke-DevStoreUpdaterRun' {
     }
 
     It 'records a missing token as the run result' {
-        Mock -ModuleName DevStore.Agent Read-DevStoreToken { throw 'token.dat not found' }
+        Mock -ModuleName DevStore.Agent Read-DevStoreTokens { throw 'token.dat not found' }
 
         Invoke-DevStoreUpdaterRun -Root $Root
 
@@ -339,7 +379,7 @@ Describe 'Update-DevStoreCatalog' {
 
     It 'lists only repos with Windows releases, with store details cached locally' {
         $cache = @{}
-        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache $cache
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache $cache
 
         $cat = Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}
         @($cat.apps.Keys) | Should -Be @('qawalah/Tool')
@@ -354,14 +394,14 @@ Describe 'Update-DevStoreCatalog' {
     }
 
     It 'downloads store files only once per version' {
-        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
-        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
         Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 4 -Exactly
     }
 
     It 'falls back to the GitHub description when a release has no store.json' {
         $script:ToolRelease.assets = @($script:ToolRelease.assets | Where-Object { $_.name -like 'tool-*' })
-        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
         $app = (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool']
         $app.description | Should -Be 'from GitHub'
         $app.displayName | Should -Be 'tool'
@@ -390,6 +430,19 @@ Describe 'Invoke-DevStoreRequests' {
         Should -Invoke -ModuleName DevStore.Agent Remove-DevStoreAppCore -Times 1 -ParameterFilter { $Repo -eq 'qawalah/old' }
         @(Get-ChildItem $req).Count | Should -Be 0
         $result.changed | Should -BeTrue
+    }
+
+    It 'collects apply requests and changes update modes' {
+        $req = Join-Path $Root 'requests'
+        '{"action":"apply","repo":"qawalah/a"}' | Set-Content (Join-Path $req '1.json')
+        '{"action":"set-updates","repo":"qawalah/a","mode":"notify"}' | Set-Content (Join-Path $req '2.json')
+        '{"action":"set-updates","mode":"download"}' | Set-Content (Join-Path $req '3.json')
+
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @(@{ repo = 'qawalah/a' }) }
+
+        @($result.apply) | Should -Be @('qawalah/a')
+        $result.config.apps[0].updates | Should -Be 'notify'
+        $result.config.defaultUpdates | Should -Be 'download'
     }
 
     It 'does nothing when there are no requests' {
@@ -424,5 +477,39 @@ Describe 'Update-DevStoreAgentFiles' {
     It 'does nothing without a Manager install' {
         Remove-Item $Bundled -Recurse -Force
         Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
+    }
+}
+
+Describe 'Update-DevStoreCatalog with several accounts' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Get-DevStoreAccessibleRepos {
+            param($Token)
+            if ($Token -eq 'mine') { return @([pscustomobject]@{ full_name = 'qawalah/Tool'; description = 'mine' }) }
+            return @([pscustomobject]@{ full_name = 'alialyami90/JIC'; description = 'shared' },
+                     [pscustomobject]@{ full_name = 'qawalah/Tool'; description = 'seen twice' })
+        }
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases {
+            param($Repo, $Token)
+            $n = ($Repo -split '/')[1].ToLower()
+            @([pscustomobject]@{ tag_name = 'windows-v1.0.0'; draft = $false; prerelease = $false; published_at = ''
+                assets = @([pscustomobject]@{ id = 1; name = "$n-1.0.0-win-x64.zip" }) })
+        }
+        Mock -ModuleName DevStore.Agent Save-DevStoreAsset {}
+    }
+
+    It 'lists repos from every account, marks other owners as shared and remembers which token reads each' {
+        $repoTokens = @{}
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 'mine' }, @{ login = 'alialyami90'; token = 'theirs' }) `
+            -ReleaseCache @{} -RepoTokens $repoTokens
+
+        $cat = Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}
+        $cat.apps['qawalah/Tool'].shared | Should -BeFalse
+        $cat.apps['alialyami90/JIC'].shared | Should -BeTrue
+        $cat.apps['alialyami90/JIC'].owner | Should -Be 'alialyami90'
+        $repoTokens['qawalah/Tool'] | Should -Be 'mine'
+        $repoTokens['alialyami90/JIC'] | Should -Be 'theirs'
+        $cat.account | Should -Be 'qawalah'
     }
 }

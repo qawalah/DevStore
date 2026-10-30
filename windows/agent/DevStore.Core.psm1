@@ -152,16 +152,82 @@ function ConvertTo-DevStoreSafeName {
     return ($Repo.ToLowerInvariant() -replace '/', '__' -replace '[^a-z0-9._-]', '_')
 }
 
+$script:UpdateModes = @('auto', 'download', 'notify')
+
 function ConvertFrom-DevStoreRequest {
-    # Validates a request file written by the Manager. Returns @{action; repo} or $null.
+    # Validates a request file written by the Manager. Returns @{action; repo; mode} or $null.
     param($Request)
     if ($null -eq $Request -or $Request -isnot [hashtable] -or -not $Request.ContainsKey('action')) { return $null }
     $action = [string]$Request['action']
-    if ($action -eq 'check') { return @{ action = 'check'; repo = $null } }
-    if ($action -notin @('install', 'remove')) { return $null }
+    if ($action -eq 'check') { return @{ action = 'check'; repo = $null; mode = $null } }
     $repo = [string]$Request['repo']
+    if ($action -eq 'set-updates') {
+        $mode = [string]$Request['mode']
+        if ($mode -notin ($script:UpdateModes + 'default')) { return $null }
+        if ($repo -and -not (Test-DevStoreRepoName $repo)) { return $null }
+        if (-not $repo -and $mode -eq 'default') { return $null }
+        if (-not $repo) { $repo = $null }
+        return @{ action = $action; repo = $repo; mode = $mode }
+    }
+    if ($action -notin @('install', 'remove', 'apply')) { return $null }
     if (-not (Test-DevStoreRepoName $repo)) { return $null }
-    return @{ action = $action; repo = $repo }
+    return @{ action = $action; repo = $repo; mode = $null }
+}
+
+function Get-DevStoreUpdateMode {
+    # 'auto' (download and install), 'download' (download, install on request)
+    # or 'notify' (only show that an update exists). Per app, else the default.
+    param([hashtable]$Config, [string]$Repo)
+    foreach ($e in @($Config['apps'])) {
+        if ($e -and $e['repo'] -ieq $Repo -and $e.ContainsKey('updates') -and $e['updates'] -in $script:UpdateModes) { return $e['updates'] }
+    }
+    if ($Config.ContainsKey('defaultUpdates') -and $Config['defaultUpdates'] -in $script:UpdateModes) { return $Config['defaultUpdates'] }
+    return 'auto'
+}
+
+function Set-DevStoreConfigUpdates {
+    # Sets an app's update mode ('default' clears it), or the default when $Repo is empty.
+    param([hashtable]$Config, [string]$Repo, [string]$Mode)
+    if (-not $Repo) { $Config['defaultUpdates'] = $Mode; return $Config }
+    foreach ($e in @($Config['apps'])) {
+        if ($e -and $e['repo'] -ieq $Repo) {
+            if ($Mode -eq 'default') { [void]$e.Remove('updates') } else { $e['updates'] = $Mode }
+        }
+    }
+    return $Config
+}
+
+function ConvertFrom-DevStoreTokenText {
+    # token.dat holds one raw token (older installs) or JSON {"tokens":[{login,token}]}.
+    # Like the other list functions here, callers wrap the result in @().
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return }
+    $t = $Text.Trim()
+    if ($t.StartsWith('{')) {
+        $obj = ConvertTo-DevStoreHashtable ($t | ConvertFrom-Json)
+        return @(@($obj['tokens']) | Where-Object { $_ -and $_['token'] } | ForEach-Object { @{ login = $_['login']; token = $_['token'] } })
+    }
+    return @(@{ login = $null; token = $t })
+}
+
+function ConvertTo-DevStoreTokenText {
+    param($List)
+    $tokens = @(@($List) | ForEach-Object { [ordered]@{ login = $_['login']; token = $_['token'] } })
+    return (ConvertTo-Json -InputObject @{ tokens = $tokens } -Depth 4 -Compress)
+}
+
+function Set-DevStoreTokenEntry {
+    # 'replace': this becomes the only account. 'add': add or update it, keeping the others.
+    param($List, [string]$Login, [string]$Token, [string]$Mode = 'replace')
+    $entry = @{ login = $Login; token = $Token }
+    if ($Mode -ne 'add') { return @($entry) }
+    $out = @()
+    $found = $false
+    foreach ($e in @($List)) {
+        if ($e -and $e['login'] -and $e['login'] -ieq $Login) { $out += $entry; $found = $true } elseif ($e) { $out += $e }
+    }
+    if (-not $found) { $out += $entry }
+    return $out
 }
 
 function Select-DevStoreStoreAssets {
@@ -178,4 +244,5 @@ function Select-DevStoreStoreAssets {
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
-    ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets
+    ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets, Get-DevStoreUpdateMode, Set-DevStoreConfigUpdates,
+    ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry
