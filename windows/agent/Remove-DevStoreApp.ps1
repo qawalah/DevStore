@@ -25,25 +25,8 @@ try {
     $state = Read-DevStoreJson -Path $statePath -Default @{ apps = @{} }
     if (-not $state.ContainsKey('apps') -or $state['apps'] -isnot [hashtable]) { $state['apps'] = @{} }
 
-    $key = @($state['apps'].Keys | Where-Object { $_ -ieq $Repo }) | Select-Object -First 1
-    if ($key) {
-        $app = Select-DevStoreHashtable $state['apps'][$key]
-        $name = $null
-        if ($app) { $name = $app['name'] }
-        if ($name) {
-            if ($app['type'] -eq 'service') { Uninstall-DevStoreService -Root $Root -Name $name }
-            $display = $name
-            if ($app['displayName']) { $display = $app['displayName'] }
-            Remove-DevStoreShortcut -DisplayName $display
-            $appDir = Join-Path (Join-Path $Root 'apps') $name
-            $current = Join-Path $appDir 'current'
-            if (Test-Path -LiteralPath $current) { [System.IO.Directory]::Delete($current) }
-            if (Test-Path -LiteralPath $appDir) { Remove-Item -LiteralPath $appDir -Recurse -Force }
-            Write-DevStoreLog -Root $Root -App $name -Message "removed (data in $env:ProgramData\$name kept)"
-        }
-        $state['apps'].Remove($key)
-        Write-DevStoreJson -Path $statePath -Object $state
-    }
+    Remove-DevStoreAppCore -Root $Root -Repo $Repo -State $state
+    Write-DevStoreJson -Path $statePath -Object $state
 
     $config = Set-DevStoreConfigApp -Config $config -Repo $Repo -Present $false
     Write-DevStoreJson -Path $configPath -Object $config

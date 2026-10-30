@@ -252,6 +252,9 @@ Describe 'Invoke-DevStoreUpdaterRun' {
         New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
         Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @(@{ repo = 'qawalah/a' }, @{ repo = 'qawalah/b' }) }
         Mock -ModuleName DevStore.Agent Read-DevStoreToken { 'token' }
+        Mock -ModuleName DevStore.Agent Initialize-DevStoreLayout {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreCatalog {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreAgentFiles { $false }
     }
 
     It 'keeps going when one app fails and records the run' {
@@ -303,5 +306,123 @@ Describe 'Invoke-DevStoreUpdaterRun' {
 
         $state = Read-DevStoreJson -Path (Join-Path $Root 'state.json') -Default @{}
         $state.lastRunResult | Should -Match 'token'
+    }
+}
+
+Describe 'Update-DevStoreCatalog' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Fixtures = Join-Path $script:Root 'fixtures'
+        New-Item -ItemType Directory -Path $script:Fixtures -Force | Out-Null
+        @{ name = 'tool'; displayName = 'Tool Box'; description = 'Does tool things.'; type = 'gui'; version = '2.0.0' } |
+            ConvertTo-Json | Set-Content (Join-Path $script:Fixtures 'store.json')
+        foreach ($f in 'store-icon.png', 'store-screenshot-1.png', 'store-screenshot-2.png') {
+            Set-Content -Path (Join-Path $script:Fixtures $f) -Value "png $f"
+        }
+        $script:ToolRelease = [pscustomobject]@{ tag_name = 'windows-v2.0.0'; draft = $false; prerelease = $false; published_at = '2026-10-30T10:00:00Z'
+            assets = @('tool-2.0.0-win-x64.zip', 'tool-2.0.0-win-x64.zip.sha256', 'store.json', 'store-icon.png', 'store-screenshot-1.png', 'store-screenshot-2.png' |
+                ForEach-Object { [pscustomobject]@{ id = $_; name = $_ } }) }
+        Mock -ModuleName DevStore.Agent Get-DevStoreAccessibleRepos {
+            @([pscustomobject]@{ full_name = 'qawalah/Tool'; description = 'from GitHub'; private = $true },
+              [pscustomobject]@{ full_name = 'qawalah/AndroidOnly'; description = 'phone app'; private = $true })
+        }
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases {
+            param($Repo, $Token)
+            if ($Repo -eq 'qawalah/Tool') { return @($script:ToolRelease) }
+            return @([pscustomobject]@{ tag_name = 'android-v1.0+1'; draft = $false; prerelease = $false; assets = @() })
+        }
+        Mock -ModuleName DevStore.Agent Save-DevStoreAsset {
+            param($Repo, $AssetId, $Token, $OutFile)
+            Copy-Item (Join-Path $script:Fixtures $AssetId) $OutFile
+        }
+    }
+
+    It 'lists only repos with Windows releases, with store details cached locally' {
+        $cache = @{}
+        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache $cache
+
+        $cat = Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}
+        @($cat.apps.Keys) | Should -Be @('qawalah/Tool')
+        $app = $cat.apps['qawalah/Tool']
+        $app.displayName | Should -Be 'Tool Box'
+        $app.description | Should -Be 'Does tool things.'
+        $app.latest | Should -Be '2.0.0'
+        $app.name | Should -Be 'tool'
+        Test-Path (Join-Path $Root $app.icon) | Should -BeTrue
+        @($app.screenshots).Count | Should -Be 2
+        $cache.ContainsKey('qawalah/Tool') | Should -BeTrue
+    }
+
+    It 'downloads store files only once per version' {
+        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
+        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 4 -Exactly
+    }
+
+    It 'falls back to the GitHub description when a release has no store.json' {
+        $script:ToolRelease.assets = @($script:ToolRelease.assets | Where-Object { $_.name -like 'tool-*' })
+        Update-DevStoreCatalog -Root $Root -Token 't' -ReleaseCache @{}
+        $app = (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool']
+        $app.description | Should -Be 'from GitHub'
+        $app.displayName | Should -Be 'tool'
+        $app.icon | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Invoke-DevStoreRequests' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'requests') -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Remove-DevStoreAppCore {}
+    }
+
+    It 'applies install, remove and check requests, then deletes them' {
+        $req = Join-Path $Root 'requests'
+        '{"action":"install","repo":"qawalah/new"}' | Set-Content (Join-Path $req '1.json')
+        '{"action":"remove","repo":"qawalah/old"}' | Set-Content (Join-Path $req '2.json')
+        '{"action":"check"}' | Set-Content (Join-Path $req '3.json')
+        'not json' | Set-Content (Join-Path $req '4.json')
+        $config = @{ apps = @(@{ repo = 'qawalah/old' }) }
+
+        $result = Invoke-DevStoreRequests -Root $Root -Config $config
+
+        @($result.config.apps | ForEach-Object { $_.repo }) | Should -Be @('qawalah/new')
+        Should -Invoke -ModuleName DevStore.Agent Remove-DevStoreAppCore -Times 1 -ParameterFilter { $Repo -eq 'qawalah/old' }
+        @(Get-ChildItem $req).Count | Should -Be 0
+        $result.changed | Should -BeTrue
+    }
+
+    It 'does nothing when there are no requests' {
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @() }
+        $result.changed | Should -BeFalse
+    }
+}
+
+Describe 'Update-DevStoreAgentFiles' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Bundled = Join-Path $script:Root 'apps/devstore-manager/current/agent'
+        New-Item -ItemType Directory -Path $script:Bundled, (Join-Path $script:Root 'agent') -Force | Out-Null
+        Set-Content (Join-Path $script:Root 'agent/DevStore.Agent.psm1') 'old'
+    }
+
+    It 'copies newer updater scripts shipped with the Manager' {
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'new'
+        Set-Content (Join-Path $Bundled 'DevStoreUpdater.ps1') 'new runner'
+
+        Update-DevStoreAgentFiles -Root $Root | Should -BeTrue
+
+        Get-Content (Join-Path $Root 'agent/DevStore.Agent.psm1') | Should -Be 'new'
+        Test-Path (Join-Path $Root 'agent/DevStoreUpdater.ps1') | Should -BeTrue
+    }
+
+    It 'leaves identical scripts alone' {
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'old'
+        Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
+    }
+
+    It 'does nothing without a Manager install' {
+        Remove-Item $Bundled -Recurse -Force
+        Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
     }
 }

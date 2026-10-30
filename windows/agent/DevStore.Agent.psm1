@@ -258,12 +258,13 @@ function Copy-DevStoreAppState {
 
 function Update-DevStoreApp {
     # Brings one app up to date. Never throws: failures end up in status/lastError.
-    param([string]$Repo, $AppState, [string]$Root, [string]$Token)
+    param([string]$Repo, $AppState, [string]$Root, [string]$Token, $Releases = $null)
     $s = Copy-DevStoreAppState $AppState
     $s['lastChecked'] = Get-DevStoreTimestamp
     $logName = $Repo
     try {
-        $release = Select-DevStoreRelease -Releases (Get-DevStoreReleases -Repo $Repo -Token $Token) -Bad $s['bad']
+        if ($null -eq $Releases) { $Releases = Get-DevStoreReleases -Repo $Repo -Token $Token }
+        $release = Select-DevStoreRelease -Releases $Releases -Bad $s['bad']
         if ($null -eq $release) {
             if (-not $s['installed']) {
                 $s['status'] = 'error'
@@ -404,6 +405,194 @@ function Update-DevStoreApp {
     }
 }
 
+function Get-DevStoreAccessibleRepos {
+    # Every repo the token can read (up to 300), most recently pushed first.
+    param([string]$Token)
+    Initialize-DevStoreHttp
+    $headers = @{
+        Authorization          = "Bearer $Token"
+        Accept                 = 'application/vnd.github+json'
+        'User-Agent'           = $script:UserAgent
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    $all = New-Object System.Collections.ArrayList
+    for ($page = 1; $page -le 3; $page++) {
+        try {
+            $resp = Invoke-RestMethod -Uri "https://api.github.com/user/repos?per_page=100&sort=pushed&page=$page" -Headers $headers -Method Get -UseBasicParsing
+        }
+        catch {
+            # A GitHub App token (used by DevStore's own CI test) can't call /user/repos.
+            if ($page -ne 1) { throw }
+            $resp = (Invoke-RestMethod -Uri 'https://api.github.com/installation/repositories?per_page=100' -Headers $headers -Method Get -UseBasicParsing).repositories
+        }
+        $count = 0
+        foreach ($r in $resp) { [void]$all.Add($r); $count++ }   # foreach unrolls 5.1's single-array output
+        if ($count -lt 100) { break }
+    }
+    return $all.ToArray()
+}
+
+function Remove-DevStoreAppCore {
+    # Uninstalls an app's service, shortcut and program files and drops its state.
+    # Data in %ProgramData%\<name> is kept.
+    param([string]$Root, [string]$Repo, [hashtable]$State)
+    if (-not $State.ContainsKey('apps') -or $State['apps'] -isnot [hashtable]) { $State['apps'] = @{} }
+    $key = @($State['apps'].Keys | Where-Object { $_ -ieq $Repo }) | Select-Object -First 1
+    if (-not $key) { return }
+    $app = Select-DevStoreHashtable $State['apps'][$key]
+    if ($app -and $app['name']) {
+        $name = $app['name']
+        if ($app['type'] -eq 'service') { Uninstall-DevStoreService -Root $Root -Name $name }
+        $display = $name
+        if ($app['displayName']) { $display = $app['displayName'] }
+        Remove-DevStoreShortcut -DisplayName $display
+        $appDir = Join-DevStorePath $Root 'apps' $name
+        $current = Join-DevStorePath $appDir 'current'
+        if (Test-Path -LiteralPath $current) { [System.IO.Directory]::Delete($current) }
+        if (Test-Path -LiteralPath $appDir) { Remove-Item -LiteralPath $appDir -Recurse -Force }
+        Write-DevStoreLog -Root $Root -App $name -Message "removed (data in $env:ProgramData\$name kept)"
+    }
+    $State['apps'].Remove($key)
+}
+
+function Invoke-DevStoreRequests {
+    # Applies install/remove/check requests the Manager dropped in <Root>\requests.
+    param([string]$Root, [hashtable]$Config, [hashtable]$State = @{ apps = @{} })
+    $dir = Join-DevStorePath $Root 'requests'
+    $changed = $false
+    $check = $false
+    if (Test-Path -LiteralPath $dir) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File | Sort-Object LastWriteTime)) {
+            $req = ConvertFrom-DevStoreRequest (Read-DevStoreJson -Path $f.FullName -Default $null)
+            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+            if ($null -eq $req) { Write-DevStoreLog -Root $Root -Message "ignored an invalid request ($($f.Name))"; continue }
+            switch ($req['action']) {
+                'install' {
+                    $Config = Set-DevStoreConfigApp -Config $Config -Repo $req['repo'] -Present $true
+                    Write-DevStoreLog -Root $Root -App $req['repo'] -Message 'install requested'
+                }
+                'remove' {
+                    Remove-DevStoreAppCore -Root $Root -Repo $req['repo'] -State $State
+                    $Config = Set-DevStoreConfigApp -Config $Config -Repo $req['repo'] -Present $false
+                }
+                'check' { $check = $true }
+            }
+            $changed = $true
+        }
+    }
+    return @{ config = $Config; changed = $changed; check = $check }
+}
+
+function Update-DevStoreCatalog {
+    # Finds every repo with a Windows release and writes catalog.json for the
+    # Manager's Discover page. Store files (icon, screenshots) are cached per
+    # version in <Root>\catalog\<owner__repo>. Fills $ReleaseCache[repo].
+    param([string]$Root, [string]$Token, [hashtable]$ReleaseCache = @{})
+    $catPath = Join-DevStorePath $Root 'catalog.json'
+    $old = Read-DevStoreJson -Path $catPath -Default @{}
+    $oldApps = @{}
+    if ($old.ContainsKey('apps') -and $old['apps'] -is [hashtable]) { $oldApps = $old['apps'] }
+    $apps = @{}
+    foreach ($repoInfo in @(Get-DevStoreAccessibleRepos -Token $Token)) {
+        $repo = [string]$repoInfo.full_name
+        try {
+            $releases = @(Get-DevStoreReleases -Repo $repo -Token $Token)
+            $ReleaseCache[$repo] = $releases
+            $release = Select-DevStoreRelease -Releases $releases -Bad @()
+            if ($null -eq $release) { continue }
+            $version = (ConvertFrom-DevStoreTag $release.tag_name).ToString()
+            $zip = @($release.assets | Where-Object { $_.name -like "*-$version-win-x64.zip" }) | Select-Object -First 1
+            if (-not $zip) { continue }
+            $name = $zip.name.Substring(0, $zip.name.Length - "-$version-win-x64.zip".Length)
+            $safe = ConvertTo-DevStoreSafeName $repo
+            $cacheRel = "catalog\$safe"
+            $cacheDir = Join-DevStorePath $Root 'catalog' $safe
+            $prev = Select-DevStoreHashtable $oldApps[$repo]
+            $store = Select-DevStoreStoreAssets $release
+            $entry = @{
+                repo = $repo; name = $name; displayName = $name; latest = $version; type = $null
+                description = [string]$repoInfo.description; icon = $null; screenshots = @()
+                publishedAt = [string]$release.published_at
+            }
+            if ($prev -and $prev['latest'] -eq $version -and (Test-Path -LiteralPath $cacheDir)) {
+                foreach ($k in 'displayName', 'description', 'type', 'icon', 'screenshots') { $entry[$k] = $prev[$k] }
+            }
+            else {
+                if (Test-Path -LiteralPath $cacheDir) { Remove-Item -LiteralPath $cacheDir -Recurse -Force }
+                New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+                if ($store['meta']) {
+                    $metaFile = Join-DevStorePath $cacheDir 'store.json'
+                    Save-DevStoreAsset -Repo $repo -AssetId $store['meta'].id -Token $Token -OutFile $metaFile
+                    $meta = Read-DevStoreJson -Path $metaFile -Default @{}
+                    if ($meta['displayName']) { $entry['displayName'] = [string]$meta['displayName'] }
+                    if ($meta['description']) { $entry['description'] = [string]$meta['description'] }
+                    if ($meta['type']) { $entry['type'] = [string]$meta['type'] }
+                }
+                if ($store['icon']) {
+                    Save-DevStoreAsset -Repo $repo -AssetId $store['icon'].id -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
+                    $entry['icon'] = "$cacheRel\icon.png"
+                }
+                $shots = @()
+                $i = 0
+                foreach ($a in @($store['screenshots'])) {
+                    $i++
+                    Save-DevStoreAsset -Repo $repo -AssetId $a.id -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
+                    $shots += "$cacheRel\screenshot-$i.png"
+                }
+                $entry['screenshots'] = $shots
+            }
+            $apps[$repo] = $entry
+        }
+        catch {
+            Write-DevStoreLog -Root $Root -App $repo -Message "couldn't read releases: $($_.Exception.Message)"
+        }
+    }
+    Write-DevStoreJson -Path $catPath -Object @{ updated = Get-DevStoreTimestamp; apps = $apps }
+}
+
+function Update-DevStoreAgentFiles {
+    # Self-update: the Manager's release carries the updater scripts in agent\.
+    # Copy them over C:\DevStore\agent when they differ. Returns $true if updated.
+    param([string]$Root)
+    $bundled = Join-DevStorePath $Root 'apps' 'devstore-manager' 'current' 'agent'
+    if (-not (Test-Path -LiteralPath $bundled)) { return $false }
+    $target = Join-DevStorePath $Root 'agent'
+    $changed = $false
+    foreach ($f in @(Get-ChildItem -LiteralPath $bundled -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })) {
+        $dest = Join-DevStorePath $target $f.Name
+        $same = (Test-Path -LiteralPath $dest) -and ((Get-FileHash -LiteralPath $f.FullName).Hash -eq (Get-FileHash -LiteralPath $dest).Hash)
+        if (-not $same) { Copy-Item -LiteralPath $f.FullName -Destination $dest -Force; $changed = $true }
+    }
+    if ($changed) { Write-DevStoreLog -Root $Root -Message 'updater scripts updated from the DevStore Manager release' }
+    return $changed
+}
+
+function Initialize-DevStoreLayout {
+    # Runs every pass as SYSTEM, so older installs pick up new layout needs:
+    # a requests folder normal users can write to, and permission for normal
+    # users to start the updater task (the Manager's "Check for updates").
+    param([string]$Root, [string]$TaskName = 'DevStore Updater')
+    $req = Join-DevStorePath $Root 'requests'
+    if (-not (Test-Path -LiteralPath $req)) {
+        New-Item -ItemType Directory -Path $req -Force | Out-Null
+        & icacls.exe $req /grant '*S-1-5-32-545:(OI)(CI)M' /C /Q | Out-Null
+    }
+    $marker = Join-DevStorePath $Root 'agent' '.task-permission'
+    if (-not (Test-Path -LiteralPath $marker)) {
+        try {
+            $svc = New-Object -ComObject Schedule.Service
+            $svc.Connect()
+            $task = $svc.GetFolder('\').GetTask($TaskName)
+            $sddl = $task.GetSecurityDescriptor(4)   # DACL only
+            if ($sddl -notmatch '\(A;;GRGX;;;AU\)') { $task.SetSecurityDescriptor($sddl + '(A;;GRGX;;;AU)', 0) }
+            Set-Content -LiteralPath $marker -Value 'ok'
+        }
+        catch {
+            Write-DevStoreLog -Root $Root -Message "couldn't let normal users start the updater: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Invoke-DevStoreUpdaterRun {
     # One updater pass over every app in config.json. Writes state.json.
     param([string]$Root)
@@ -413,9 +602,14 @@ function Invoke-DevStoreUpdaterRun {
         return
     }
     try {
-        $config = Read-DevStoreJson -Path (Join-DevStorePath $Root 'config.json') -Default @{ apps = @() }
+        try { Initialize-DevStoreLayout -Root $Root } catch { Write-DevStoreLog -Root $Root -Message "layout: $($_.Exception.Message)" }
+        $configPath = Join-DevStorePath $Root 'config.json'
+        $config = Read-DevStoreJson -Path $configPath -Default @{ apps = @() }
         $statePath = Join-DevStorePath $Root 'state.json'
         $state = Read-DevStoreJson -Path $statePath -Default @{}
+        if (-not $state.ContainsKey('apps') -or $state['apps'] -isnot [hashtable]) { $state['apps'] = @{} }
+        $requests = Invoke-DevStoreRequests -Root $Root -Config $config -State $state
+        if ($requests['changed']) { $config = $requests['config']; Write-DevStoreJson -Path $configPath -Object $config }
         $oldApps = @{}
         if ($state.ContainsKey('apps') -and $state['apps'] -is [hashtable]) { $oldApps = $state['apps'] }
         $newApps = @{}
@@ -425,14 +619,24 @@ function Invoke-DevStoreUpdaterRun {
         try { $token = Read-DevStoreToken -Root $Root }
         catch { $token = $null; $runError = $_.Exception.Message }
 
+        $releaseCache = @{}
+        $state['catalogError'] = $null
         if ($token) {
+            try { Update-DevStoreCatalog -Root $Root -Token $token -ReleaseCache $releaseCache }
+            catch {
+                $state['catalogError'] = $_.Exception.Message
+                Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
+            }
             foreach ($entry in @($config['apps'])) {
                 if ($null -eq $entry -or -not $entry['repo']) { continue }
                 $repo = [string]$entry['repo']
                 $prev = $null
                 if ($oldApps.ContainsKey($repo)) { $prev = $oldApps[$repo] }
                 try {
-                    $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $token)
+                    $cached = $null
+                    $hit = @($releaseCache.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1
+                    if ($hit) { $cached = $releaseCache[$hit] }
+                    $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $token -Releases $cached)
                     if ($null -eq $s) { throw 'The updater returned no result for this app.' }
                 }
                 catch {
@@ -449,6 +653,7 @@ function Invoke-DevStoreUpdaterRun {
             $newApps = $oldApps
         }
 
+        try { [void](Update-DevStoreAgentFiles -Root $Root) } catch { Write-DevStoreLog -Root $Root -Message "self-update: $($_.Exception.Message)" }
         $state['apps'] = $newApps
         $state['lastRun'] = Get-DevStoreTimestamp
         if ($runError) { $state['lastRunResult'] = "failed: $runError" }
@@ -463,7 +668,8 @@ function Invoke-DevStoreUpdaterRun {
     }
 }
 
-Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Write-DevStoreLog, Read-DevStoreToken, Write-DevStoreToken,
+Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos,
+    Remove-DevStoreAppCore, Invoke-DevStoreRequests, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog, Read-DevStoreToken, Write-DevStoreToken,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,

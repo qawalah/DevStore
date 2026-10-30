@@ -114,3 +114,24 @@ jobs:
           if ($app.Value.status -ne 'ok' -or -not $app.Value.installed) { throw "Manager not installed: status=$($app.Value.status) error=$($app.Value.lastError)" }
           if (-not (Test-Path "C:\DevStore\apps\devstore-manager\current\devstore-manager.exe")) { throw 'devstore-manager.exe missing' }
           Write-Output "OK: devstore-manager $($app.Value.installed) installed"
+      - name: Check discovery and installing/removing without admin
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cat = Get-Content C:\DevStore\catalog.json -Raw | ConvertFrom-Json
+          $listed = $cat.apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY }
+          if (-not $listed) { Get-Content C:\DevStore\catalog.json -Raw; throw 'catalog.json does not list this repo' }
+          Write-Output "Discover lists: $($listed.Value.displayName) $($listed.Value.latest)"
+          function Invoke-Run { powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DevStore\agent\DevStoreUpdater.ps1 -Root C:\DevStore; if ($LASTEXITCODE) { throw "updater exit $LASTEXITCODE" } }
+          function Get-App { ((Get-Content C:\DevStore\state.json -Raw | ConvertFrom-Json).apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY }) }
+          # Remove via a request file, as the Manager does without admin rights.
+          @{ action = 'remove'; repo = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content C:\DevStore\requests\e2e-remove.json
+          Invoke-Run
+          if (Get-App) { throw 'app still in state after remove request' }
+          if (Test-Path C:\DevStore\apps\devstore-manager) { throw 'app folder still there after remove request' }
+          # Install again via a request file.
+          @{ action = 'install'; repo = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content C:\DevStore\requests\e2e-install.json
+          Invoke-Run
+          $app = Get-App
+          if (-not $app -or $app.Value.status -ne 'ok') { throw "reinstall failed: $($app.Value.lastError)" }
+          Write-Output 'OK: discovery, remove and install requests work'
+          Get-Content C:\DevStore\logs\updater-*.log
