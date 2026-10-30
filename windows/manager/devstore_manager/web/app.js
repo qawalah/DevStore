@@ -121,6 +121,7 @@ function renderUpdater(u) {
   $("#updater-dot").className = `dot ${u.kind}`;
   $("#updater-title").textContent = u.title;
   $("#updater-sub").textContent = u.sub;
+  $("#updater").title = `${u.title}. ${u.sub}`;
 }
 
 function renderBanner() {

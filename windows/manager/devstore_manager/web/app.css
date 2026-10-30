@@ -197,9 +197,19 @@ h2 { font: 600 16px/1.3 var(--font-display); margin: 26px 0 8px; }
 
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; box-shadow: var(--shadow); max-width: 520px; font-size: 13px; }
 
-@media (max-width: 760px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
+/* Narrow windows (or high display scaling): the sidebar becomes an icon rail. */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 64px 1fr; }
+  .sidebar { padding: 14px 8px; align-items: center; }
+  .brand { padding: 4px 0 18px; }
+  .brand-name, .nav .label, .count, .updater-sub, #updater-title, #check-now .label { display: none; }
+  .nav-item { justify-content: center; padding: 10px; position: relative; }
+  .updater { padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .updater-line { justify-content: center; }
+  #check-now { width: 40px; padding: 0; }
+  .topbar, .view { padding-left: 22px; padding-right: 22px; }
+  .banner { margin-left: 22px; margin-right: 22px; }
+  .search { width: 220px; }
   .detail-body { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
