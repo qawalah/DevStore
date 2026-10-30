@@ -178,8 +178,9 @@ and `packages: write` (push and delete).
 - **`docker-checks`:** pulls the `smoke-test` and `plan-cleanup` step scripts
   out of `docker-release.yml` with `yq`, so the test runs exactly what ships.
   - The smoke test must **fail** for `samples/hello-docker-broken`
-    `Dockerfile.unhealthy` (its health command always fails) and
-    `Dockerfile.no-healthcheck`.
+    `Dockerfile.unhealthy` (its health command always fails),
+    `Dockerfile.no-healthcheck`, and `Dockerfile.exits` (the process exits
+    at once, which must be reported straight away, not after the timeout).
   - The cleanup plan must produce exactly the ids in
     `samples/docker-cleanup/expected-delete.txt` for
     `samples/docker-cleanup/versions.json`. The fixture has old versions, an
@@ -320,7 +321,8 @@ DevStore
   .github/workflows/docker-release.yml     new reusable workflow
   .github/workflows/self-test.yml          + docker-build, docker-checks
   samples/hello-docker/                    Dockerfile, devstore.json
-  samples/hello-docker-broken/             Dockerfile.unhealthy, Dockerfile.no-healthcheck
+  samples/hello-docker-broken/             Dockerfile.unhealthy, .no-healthcheck, .exits
+  scripts/test-docker-steps.sh             runs the shipped step scripts on samples
   samples/docker-cleanup/                  versions.json, expected-delete.txt
   docs/nas-setup.md                        new
   docs/handover/onboard-repo.md            + Docker section
