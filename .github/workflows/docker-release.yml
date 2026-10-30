@@ -1,0 +1,77 @@
+# Reusable workflow: build a Docker app's image, check that it starts healthy,
+# and publish it to GitHub's container registry (ghcr.io), where Watchtower on
+# the NAS picks it up. App repos call it from their release workflow (see
+# docs/handover/onboard-repo.md); docs/nas-setup.md covers the NAS side.
+name: DevStore Docker release
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Folder containing devstore.json and the Dockerfile
+        type: string
+        default: .
+      dockerfile:
+        description: Dockerfile path, relative to working-directory
+        type: string
+        default: Dockerfile
+      context:
+        description: Build context, relative to working-directory
+        type: string
+        default: .
+      image:
+        description: "Image name under ghcr.io/<owner>/ (default: name in devstore.json)"
+        type: string
+        default: ""
+      keep:
+        description: How many versions to keep on ghcr.io
+        type: number
+        default: 2
+      health-timeout:
+        description: Seconds the smoke test waits for the image's health check to pass
+        type: number
+        default: 60
+      publish:
+        description: Push, tag, release and clean up (false = build and smoke test only)
+        type: boolean
+        default: true
+    secrets:
+      GHCR_CLEANUP_TOKEN:
+        description: Classic token with read:packages and delete:packages, for when the workflow token may not delete old versions
+        required: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Uses only environment variables, so scripts/test-docker-steps.sh can run it as is.
+      - name: Plan cleanup
+        id: plan-cleanup
+        if: inputs.publish
+        env:
+          VERSIONS_FILE: ${{ runner.temp }}/versions.json
+          KEEP: ${{ inputs.keep }}
+          DELETE_FILE: ${{ runner.temp }}/delete.txt
+        run: |
+          if [ "$KEEP" -lt 1 ]; then echo "::error::keep must be at least 1 (got $KEEP)"; exit 1; fi
+          # Keep the $KEEP versions with the highest X.Y.Z tag (compared as numbers, so
+          # 1.10.0 beats 1.9.0) and anything tagged latest. Delete the rest, untagged included.
+          jq -r --argjson keep "$KEEP" '
+            def semver: [.metadata.container.tags[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                         | split(".") | map(tonumber)] | max;
+            (map(select(semver != null)) | sort_by(semver) | reverse | .[:$keep] | map(.id)) as $newest
+            | map(select(((.id | IN($newest[])) or any(.metadata.container.tags[]; . == "latest")) | not) | .id)
+            | sort | .[]
+          ' "$VERSIONS_FILE" > "$DELETE_FILE"
+          echo "ghcr.io has $(jq length "$VERSIONS_FILE") version(s); deleting $(wc -l < "$DELETE_FILE")."
+          jq -r --rawfile del "$DELETE_FILE" '
+            ($del | split("\n") | map(select(length > 0) | tonumber)) as $d
+            | .[] | "  \(if (.id | IN($d[])) then "delete" else "keep  " end) \(.id) \(.metadata.container.tags | join(", ") | if . == "" then "(untagged)" else . end)"
+          ' "$VERSIONS_FILE"
