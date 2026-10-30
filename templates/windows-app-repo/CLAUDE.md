@@ -21,8 +21,15 @@ Updater on the user's Windows PC installs within about 10 minutes.
     file for win-x64, and the exe is renamed to `<name>.exe`.
 - `version`: `MAJOR.MINOR.PATCH`. **Bump it for every change the user should
   receive.** No bump means no release (the build still runs as a check).
+- Store listing (shown in the DevStore window), all optional:
+  - `displayName`: the app's name, for example `"SimDeck Companion"`.
+  - `description`: one or two plain sentences about what the app does.
+  - `icon`: a square PNG in the repo (256×256 is ideal), for example
+    `"store/icon.png"`.
+  - `screenshots`: up to 6 PNGs, for example `["store/1.png", "store/2.png"]`.
 - Optional:
-  - `displayName`: the Start-menu name, for example `"SimDeck Companion"`.
+  - `data` (Python only): folders the app reads at runtime, bundled at the
+    same path, for example `["web"]`.
   - `include`: a list of files or folders, relative to `devstore.json`,
     shipped next to the exe.
   - `prepare`: a `.ps1` script run after the build. It can put extra parts

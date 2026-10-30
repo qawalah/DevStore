@@ -1,5 +1,7 @@
 {
   "name": "my-app",
+  "displayName": "My App",
+  "description": "One or two plain sentences about what this app does.",
   "type": "gui",
   "language": "python",
   "entry": "src/main.py",
