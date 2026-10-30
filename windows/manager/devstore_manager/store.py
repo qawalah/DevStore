@@ -150,7 +150,8 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
 
 
 def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str],
-               pending: dict[str, str], now: dt.datetime, running: Optional[set] = None) -> dict:
+               pending: dict[str, str], now: dt.datetime, running: Optional[set] = None,
+               self_version: Optional[str] = None) -> dict:
     """Everything the window renders. `pending` maps repo -> 'install'/'remove' for
     requests the updater hasn't picked up yet; `services` maps devstore-<name> -> status;
     `running` holds the names of window apps that are open right now."""
@@ -174,6 +175,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         app_type = (s or {}).get("type") or c.get("type") or ""
         service = services.get(f"devstore-{name}") if app_type == "service" else None
         is_self = name == SELF_NAME
+        if is_self and s and s.get("restartPending") and self_version and self_version == s.get("installed"):
+            s = {**s, "restartPending": False}   # this window already is the installed version
         is_running = app_type != "service" and name in (running or set())
         status = _status(s, in_config, pend.get(key), service, is_running)
         apps.append({
