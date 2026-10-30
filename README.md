@@ -25,6 +25,7 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 1. [Phone setup](docs/phone-setup.md): Obtainium and a GitHub token.
 2. [Windows setup](docs/windows-setup.md): install the updater and Manager.
 3. [Move an app from a Claude chat](docs/handover/README.md): once per app.
+4. [Roadmap](docs/ROADMAP.md): what's planned next.
 
 ## What's in this repo
 | Path | What it is |

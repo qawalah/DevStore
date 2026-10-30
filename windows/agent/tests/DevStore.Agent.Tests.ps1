@@ -375,6 +375,28 @@ Describe 'Update-DevStoreCatalog' {
             param($Repo, $AssetId, $Token, $OutFile)
             Copy-Item (Join-Path $script:Fixtures $AssetId) $OutFile
         }
+        Mock -ModuleName DevStore.Agent Get-DevStoreRepoTree { @() }
+        Mock -ModuleName DevStore.Agent Save-DevStoreRepoFile { param($Repo, $Path, $Ref, $Token, $OutFile) Set-Content $OutFile "png $Path" }
+    }
+
+    It 'takes screenshots and the icon from the repo when the release has none' {
+        $script:ToolRelease.assets = @($script:ToolRelease.assets | Where-Object { $_.name -like 'tool-*' })
+        Mock -ModuleName DevStore.Agent Get-DevStoreRepoTree {
+            @('windows/devstore.json', 'windows/docs/screenshots/01.png', 'windows/docs/screenshots/02.png', 'windows/store/icon.png')
+        }
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        $app = (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool']
+        @($app.screenshots).Count | Should -Be 2
+        Test-Path (Join-Path $Root $app.icon) | Should -BeTrue
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreRepoTree -Times 1 -ParameterFilter { $Ref -eq 'windows-v2.0.0' }
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreRepoFile -Times 3 -Exactly
+    }
+
+    It 'refreshes listings cached before repo screenshots were supported' {
+        Write-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Object @{ apps = @{ 'qawalah/Tool' = @{ latest = '2.0.0'; displayName = 'old' } } }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'catalog/qawalah__tool') -Force | Out-Null
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool'].displayName | Should -Be 'Tool Box'
     }
 
     It 'lists only repos with Windows releases, with store details cached locally' {
@@ -521,6 +543,7 @@ Describe 'Update-DevStoreCatalog with several accounts' {
                 assets = @([pscustomobject]@{ id = 1; name = "$n-1.0.0-win-x64.zip" }) })
         }
         Mock -ModuleName DevStore.Agent Save-DevStoreAsset {}
+        Mock -ModuleName DevStore.Agent Get-DevStoreRepoTree { @() }
     }
 
     It 'lists repos from every account, marks other owners as shared and remembers which token reads each' {
