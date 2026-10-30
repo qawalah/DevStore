@@ -443,3 +443,23 @@ build -trimpath -ldflags "-s -w -X main.version=<version>"` into
 hashed and released exactly like a Python build, so the PC-side updater and
 the Manager need no change. Covered by `samples/hello-windows-go` in the
 self-test.
+
+## 15. Additions for existing apps (Werd, SimDeck)
+
+- **Own Android key.** Optional secrets `DEVSTORE_KEY_ALIAS` (default
+  `devstore`) and `DEVSTORE_KEY_PASSWORD` (default: the keystore password)
+  let an app keep the key its installed copies were signed with. A wrong
+  alias stops the release and lists the aliases found.
+- **C#/.NET.** `language: dotnet`, `entry` = `.csproj`. Built with
+  `dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=<version>`;
+  the exe is renamed to `<name>.exe`.
+- **Extra files.** `include` (files/folders copied next to the exe) and
+  `prepare` (a `.ps1` run after the build, with `DEVSTORE_OUT` set to the
+  package folder).
+- **Tray apps.** `updateWhileRunning: true` in `devstore.json`. The updater
+  swaps the `current` junction while the app runs, skips deleting old version
+  folders that run, records `restartPending`, and the Manager shows "Updated
+  to vX, restart the app to use it". The flag is read from the installed
+  build, so it applies from the first install onwards.
+- **Combined repos.** `templates/app-repo-both/` runs both pipelines from one
+  workflow file. Tags are `android-v…` and `windows-v…`.

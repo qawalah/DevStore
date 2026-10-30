@@ -34,22 +34,33 @@ Android app and a Windows companion, set up both.
 5. If an Android SDK is available, run `./gradlew assembleRelease`;
    otherwise rely on CI.
 
-## 3b. Windows (Python or Go)
+## 3b. Windows (Python, Go or C#/.NET)
 1. Copy from DevStore `templates/windows-app-repo/`:
-   `.github/workflows/release.yml`, `CLAUDE.md`, `.gitignore`,
-   `devstore.json`, plus `requirements.txt` if the project has none.
-2. Fill in `devstore.json`:
-   - `name`: lowercase-with-dashes, permanent, and the same as the exe the build makes (for example `werd-server`),
-   - `language`: `python` or `go`,
-   - `type`: `gui` or `service`,
-   - `entry`: Python: the main `.py` file. Go: the main package (`.` or `./cmd/<name>`; `go.mod` must be next to `devstore.json`),
-   - `version`: the current version, or `1.0.0`.
-3. Apply the rules in the template `CLAUDE.md`. Above all, move data, settings
-   and logs to `%ProgramData%\<name>\`, and make services exit cleanly on
-   SIGINT, SIGTERM and SIGBREAK. Mention these changes in your summary.
-4. If the project's code lives in a folder (for example `src/`), keep it and
-   point `entry` at it. Only if `devstore.json` isn't at the repo root,
+   `.github/workflows/release.yml`, `CLAUDE.md`, `.gitignore` and
+   `devstore.json`, plus `requirements.txt` for a Python project that has
+   none.
+2. Fill in `devstore.json` as the template `CLAUDE.md` describes. `name` is
+   permanent, lowercase-with-dashes, and becomes the exe name (for example
+   `werd-server`). `language` is `python`, `go` or `dotnet`. `entry` is the
+   `.py` file, the Go package, or the `.csproj`. Use `displayName` for a
+   friendly Start-menu name.
+3. If the app ships extra files next to its exe (for example an AI engine
+   folder), use `include` for files in the repo, or a `prepare` script that
+   downloads them into `$env:DEVSTORE_OUT`.
+4. If it's a tray app that keeps running, set `"updateWhileRunning": true`.
+5. Apply the template's code rules. Above all, keep data, settings and logs
+   out of the install folder. Services must exit cleanly on Ctrl+C/SIGTERM.
+   Mention any changes in your summary.
+6. If `devstore.json` isn't at the repo root (for example in `server/`),
    pass `working-directory:` under `with:` in the release workflow.
+
+## 3c. Both Android and Windows in one repo
+Use DevStore `templates/app-repo-both/.github/workflows/release.yml` as the
+only release workflow, with `working-directory` pointing at the Windows
+part's folder. Do 3a for the Android part and steps 2–5 of 3b for the Windows
+part, with one `CLAUDE.md` that has both sets of rules. Each part releases
+when its own version is bumped. In Obtainium, filter the repo's releases
+with `^android-`.
 
 ## 4. Finish
 1. Keep `HANDOVER.md` in the repo.
