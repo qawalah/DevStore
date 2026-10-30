@@ -36,7 +36,7 @@ jobs:
           Invoke-Pester -Configuration $c
 
   manager-tests:
-    name: Manager tests
+    name: Manager and installer tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -49,6 +49,15 @@ jobs:
       - name: Manager imports with tkinter
         working-directory: windows/manager
         run: python -c "import devstore_manager.ui"
+      - name: Setup installer tests
+        working-directory: windows/setup
+        run: python -m pytest -v
+
+  setup-build:
+    name: Setup installer (build only)
+    uses: ./.github/workflows/setup-release.yml
+    permissions:
+      contents: write
 
   android-build:
     name: Android pipeline (build only)
