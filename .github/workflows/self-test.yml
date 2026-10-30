@@ -76,3 +76,41 @@ jobs:
     with:
       working-directory: ${{ matrix.dir }}
       publish: false
+
+  e2e-windows:
+    # Real end-to-end run on a clean Windows machine, like a user's PC:
+    # install the agent with Windows PowerShell 5.1, run the updater against
+    # this repo's real releases, and check the DevStore Manager got installed.
+    name: End-to-end install (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install agent
+        env:
+          DEVSTORE_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\windows\agent\Install-DevStoreAgent.ps1 -ManagerRepo $env:GITHUB_REPOSITORY
+      - name: Run the updater once (after the task's own first run)
+        run: |
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-ScheduledTask -TaskName 'DevStore Updater').State -eq 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep 5 }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DevStore\agent\DevStoreUpdater.ps1 -Root C:\DevStore
+      - name: Show state and log
+        if: always()
+        run: |
+          Write-Output '--- config.json'; Get-Content C:\DevStore\config.json -Raw
+          Write-Output '--- state.json'; Get-Content C:\DevStore\state.json -Raw
+          Write-Output '--- logs'; Get-Content C:\DevStore\logs\updater-*.log
+      - name: Check the Manager was installed
+        run: |
+          $state = Get-Content C:\DevStore\state.json -Raw | ConvertFrom-Json
+          $app = $state.apps.PSObject.Properties | Where-Object { $_.Name -ieq $env:GITHUB_REPOSITORY } | Select-Object -First 1
+          if (-not $app) { throw "state.json has no entry for $env:GITHUB_REPOSITORY" }
+          if ($app.Value.status -ne 'ok' -or -not $app.Value.installed) { throw "Manager not installed: status=$($app.Value.status) error=$($app.Value.lastError)" }
+          if (-not (Test-Path "C:\DevStore\apps\devstore-manager\current\devstore-manager.exe")) { throw 'devstore-manager.exe missing' }
+          Write-Output "OK: devstore-manager $($app.Value.installed) installed"
