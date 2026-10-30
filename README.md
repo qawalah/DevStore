@@ -11,8 +11,10 @@ version, it installs itself on your devices:
   - **services** restart, and roll back automatically if the new version
     fails.
 
-  The **DevStore Manager** window shows what's installed and lets you add,
-  remove and control apps.
+  The **DevStore** window is your app store. It finds the Windows apps in
+  your GitHub (and repos shared with you), shows icons and screenshots,
+  installs them, keeps them updated (automatically, or when you choose),
+  and updates itself.
 
 ```
 Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Release ──▶ Obtainium (phone)
@@ -34,7 +36,7 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 | `templates/app-repo/` | Files every Android app repo gets |
 | `templates/windows-app-repo/` | Files every Windows app repo gets |
 | `scripts/create-signing-key.sh` | Creates the one shared Android signing key |
-| `windows/agent/` | DevStore Updater (PowerShell) + Pester tests |
+| `windows/agent/` | DevStore Updater (PowerShell) + Pester tests. **Bump `windows/agent/VERSION` with every updater change**: installed updaters only self-update to a higher version |
 | `windows/manager/` | DevStore Manager (Python/tkinter) + pytest tests |
 | `windows/setup/` | `DevStoreSetup.exe` installer (released by `setup-release.yml`) |
 | `templates/app-repo-both/` | Release workflow for a repo with both an Android app and a Windows part |

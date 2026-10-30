@@ -152,7 +152,7 @@ code { font: 12.5px var(--mono); background: var(--surface-2); padding: 1px 5px;
 .card-foot .btn { flex: none; }
 .state { font-size: 12.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
 .state.ok { color: var(--ok); }
-.state.pending, .state.busy { color: var(--accent); }
+.state.pending, .state.busy, .state.update { color: var(--accent); }
 .state.warn { color: var(--warn); }
 .state.error { color: var(--error); }
 .state svg { width: 15px; height: 15px; }
@@ -164,6 +164,14 @@ code { font: 12.5px var(--mono); background: var(--surface-2); padding: 1px 5px;
 .add-row { display: flex; gap: 8px; flex: 0 1 380px; }
 .add-row input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
 .add-row input:focus { outline: none; border-color: var(--accent); }
+
+.select { height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; min-width: 240px; max-width: 100%; }
+.select:focus { outline: none; border-color: var(--accent); }
+.field-label { display: block; margin: 16px 0 6px; font-weight: 600; font-size: 13px; }
+.settings { max-width: 720px; }
+.settings section { margin-bottom: 26px; }
+.settings h2 { margin-top: 0; }
+.settings .facts .fact { align-items: center; }
 
 /* ---------- installed list */
 .rows { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }

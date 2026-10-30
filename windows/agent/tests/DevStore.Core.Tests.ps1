@@ -193,3 +193,57 @@ Describe 'Select-DevStoreStoreAssets' {
         @($a.screenshots).Count | Should -Be 0
     }
 }
+
+Describe 'GitHub account list (tokens)' {
+    It 'reads the old single-token format' {
+        $list = @(ConvertFrom-DevStoreTokenText 'github_pat_old')
+        @($list).Count | Should -Be 1
+        $list[0].token | Should -Be 'github_pat_old'
+        $list[0].login | Should -BeNullOrEmpty
+    }
+    It 'round-trips several accounts' {
+        $list = @(@{ login = 'qawalah'; token = 'a' }, @{ login = 'alialyami90'; token = 'b' })
+        $back = @(ConvertFrom-DevStoreTokenText (ConvertTo-DevStoreTokenText $list))
+        @($back | ForEach-Object { $_.login }) | Should -Be @('qawalah', 'alialyami90')
+        $back[1].token | Should -Be 'b'
+    }
+    It 'adds or replaces accounts' {
+        $list = @(@{ login = 'qawalah'; token = 'a' })
+        $list = @(Set-DevStoreTokenEntry -List $list -Login 'alialyami90' -Token 'b' -Mode 'add')
+        $list = @(Set-DevStoreTokenEntry -List $list -Login 'ALIALYAMI90' -Token 'c' -Mode 'add')
+        @($list).Count | Should -Be 2
+        $list[1].token | Should -Be 'c'
+        $list = @(Set-DevStoreTokenEntry -List $list -Login 'qawalah' -Token 'd' -Mode 'replace')
+        @($list).Count | Should -Be 1
+        $list[0].token | Should -Be 'd'
+    }
+    It 'treats empty text as no accounts' {
+        @(ConvertFrom-DevStoreTokenText '').Count | Should -Be 0
+    }
+}
+
+Describe 'Update modes' {
+    It 'uses the app setting, then the default, then automatic' {
+        $c = @{ apps = @(@{ repo = 'qawalah/a'; updates = 'notify' }, @{ repo = 'qawalah/b' }) }
+        Get-DevStoreUpdateMode -Config $c -Repo 'QAWALAH/A' | Should -Be 'notify'
+        Get-DevStoreUpdateMode -Config $c -Repo 'qawalah/b' | Should -Be 'auto'
+        $c.defaultUpdates = 'download'
+        Get-DevStoreUpdateMode -Config $c -Repo 'qawalah/b' | Should -Be 'download'
+    }
+    It 'sets a per-app mode or the default' {
+        $c = @{ apps = @(@{ repo = 'qawalah/a' }) }
+        $c = Set-DevStoreConfigUpdates -Config $c -Repo 'qawalah/a' -Mode 'download'
+        $c.apps[0].updates | Should -Be 'download'
+        $c = Set-DevStoreConfigUpdates -Config $c -Repo $null -Mode 'notify'
+        $c.defaultUpdates | Should -Be 'notify'
+        $c = Set-DevStoreConfigUpdates -Config $c -Repo 'qawalah/a' -Mode 'default'
+        $c.apps[0].ContainsKey('updates') | Should -BeFalse
+    }
+    It 'accepts apply and set-updates requests' {
+        (ConvertFrom-DevStoreRequest @{ action = 'apply'; repo = 'qawalah/a' }).action | Should -Be 'apply'
+        $r = ConvertFrom-DevStoreRequest @{ action = 'set-updates'; repo = 'qawalah/a'; mode = 'notify' }
+        $r.mode | Should -Be 'notify'
+        (ConvertFrom-DevStoreRequest @{ action = 'set-updates'; mode = 'download' }).repo | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'set-updates'; repo = 'qawalah/a'; mode = 'sometimes' } | Should -BeNullOrEmpty
+    }
+}

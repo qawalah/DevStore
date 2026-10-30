@@ -52,6 +52,8 @@ class Api:
                                 dt.datetime.now(dt.timezone.utc), running=actions.running_apps())
         for a in view["apps"]:
             a["iconData"] = self._image(a.get("icon"))
+        view["settings"]["locations"] = self._locations()
+        view["settings"]["version"] = app_version()
         self._view = view
         return view
 
@@ -88,6 +90,25 @@ class Api:
 
     def remove(self, repo: str) -> dict:
         return self._result(lambda: actions.remove(repo), "Removing. Its data folder is kept.")
+
+    @staticmethod
+    def _locations() -> dict:
+        return {"programs": str(actions.ROOT / "apps"), "data": str(actions.data_dir("")).rstrip("\\/"),
+                "logs": str(actions.LOG_DIR)}
+
+    def open_location(self, kind: str) -> dict:
+        path = self._locations().get(kind)
+        if not path:
+            return {"ok": False, "message": "Unknown folder."}
+        return self._result(lambda: actions.open_folder(Path(path)), "Opened the folder.")
+
+    def update(self, repo: str) -> dict:
+        return self._result(lambda: actions.apply_update(repo), "Updating. This usually takes under a minute.")
+
+    def set_updates(self, repo: Optional[str], mode: str) -> dict:
+        labels = {"auto": "Updates install automatically", "download": "Updates download; you choose when to install",
+                  "notify": "DevStore only tells you about updates", "default": "Updates follow your default setting"}
+        return self._result(lambda: actions.set_updates(repo or None, mode), labels.get(mode, "Saved") + ".")
 
     def check_now(self) -> dict:
         return self._result(actions.check_now, "Checking for updates now.")

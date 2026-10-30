@@ -53,7 +53,37 @@ Open **DevStore** from the Start menu.
   minutes.
 
 To give an app an icon, description and screenshots in the store, add them
-to its `devstore.json` (see the app repo's `CLAUDE.md`).
+to its `devstore.json` (see the app repo's `CLAUDE.md`), or just put PNGs in
+the repo's `store/`, `screenshots/` or `docs/screenshots/` folder.
+
+### Update settings
+In **Settings → Updates**, choose what happens when an app has a new version.
+You can override this on each app's page.
+- **Automatically:** downloaded and installed by itself (the default).
+- **Download, I'll install:** downloaded in the background; click **Install
+  update** when it suits you.
+- **Just tell me:** nothing is downloaded until you click **Update**.
+
+### Apps shared with you
+Apps in someone else's repo (where you're a collaborator) appear under
+**Shared**. GitHub doesn't let your own token read another person's repos,
+so:
+1. The repo's **owner** creates a fine-grained token on *their* account:
+   only that repo, **Contents: Read-only**. They send it to you privately.
+2. Run `DevStoreSetup.exe`, paste their token, and tick **Add as another
+   GitHub account**.
+3. Within 10 minutes their apps appear under **Shared**. **Settings → GitHub
+   accounts** lists every account DevStore uses.
+
+### Where things are
+**Settings → Where things are** opens these folders:
+- Programs: `C:\DevStore\apps\<app name>\` (DevStore keeps the current and
+  previous version)
+- App data: `C:\ProgramData\<app name>\`, or your user folder for per-user
+  settings. This is kept when an app is removed.
+- DevStore's own log: `C:\DevStore\logs\`
+
+
 
 ## How updates behave
 | App type | What happens on a new version |

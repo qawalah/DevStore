@@ -13,7 +13,14 @@ with the GitHub tools when you need them, starting with its templates.
   chat export so they can rotate it.
 - Read `HANDOVER.md` fully before changing anything.
 
-## 2. Decide the platform
+## 2. Decide the platform (set up every part)
+
+**Check the whole repo before choosing.** Many apps have more than one part,
+for example an Android app plus a Windows companion or server (in a folder
+like `windows/` or `server/`). Set up **every** part, not only the first one
+you find. A part that isn't set up never reaches the user's devices. If both
+exist, use section 3c.
+
 From `HANDOVER.md` and the files: **Android** (has `gradlew` and an Android
 module) or **Windows** (Python or Go; gui or service). If the repo has both an
 Android app and a Windows companion, set up both.

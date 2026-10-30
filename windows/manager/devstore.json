@@ -4,7 +4,7 @@
   "description": "Your personal app store. Finds the Windows apps in your GitHub, installs them, and keeps them and DevStore itself up to date.",
   "type": "gui",
   "entry": "main.py",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "icon": "store/icon.png",
   "data": ["devstore_manager/web"],
   "prepare": "tools/bundle-agent.ps1",

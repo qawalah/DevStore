@@ -9,7 +9,9 @@
       powershell -ExecutionPolicy Bypass -File .\windows\agent\Install-DevStoreAgent.ps1
 
   It's safe to re-run: it upgrades the agent scripts and keeps your apps,
-  state and token. Pass -NewToken to replace the GitHub token.
+  state and token. Pass -NewToken to replace the GitHub token. DevStoreSetup.exe
+  passes a token in DEVSTORE_TOKEN; with DEVSTORE_TOKEN_MODE=add it's added as
+  another GitHub account (for repos owned by someone else) instead.
 
   What it does:
     - creates C:\DevStore and locks its permissions down
@@ -46,7 +48,7 @@ foreach ($d in '', 'agent', 'tools', 'apps', 'logs', 'downloads') {
     $p = Join-Path $Root $d
     if (-not (Test-Path -LiteralPath $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
 }
-Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Extension -in '.ps1', '.psm1' } |
+Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Extension -in '.ps1', '.psm1' -or $_.Name -eq 'VERSION' } |
     Copy-Item -Destination (Join-Path $Root 'agent') -Force
 
 # 2. Permissions: SYSTEM + Administrators full; Users read/execute (to run
@@ -72,10 +74,25 @@ if ($envToken -or $NewToken -or -not (Test-Path -LiteralPath $tokenFile)) {
         if ([string]::IsNullOrWhiteSpace($token)) { throw 'No token entered.' }
         $token = $token.Trim()
     }
-    Write-Output "Checking the token against $ManagerRepo..."
-    Get-DevStoreReleases -Repo $ManagerRepo -Token $token | Out-Null
-    Write-DevStoreToken -Root $Root -Token $token
-    Write-Output 'Token OK and stored (encrypted for this machine).'
+    Write-Output 'Checking the token with GitHub...'
+    $login = $null
+    try { $login = Get-DevStoreLogin -Token $token }
+    catch {
+        if ($_.Exception.Message -match '401') { throw }
+        # Some tokens (like GitHub's own CI token) can't read /user; check repo access instead.
+        Get-DevStoreReleases -Repo $ManagerRepo -Token $token | Out-Null
+    }
+    # DEVSTORE_TOKEN_MODE=add keeps the existing accounts (for apps shared with you by others).
+    $mode = 'replace'
+    if ($env:DEVSTORE_TOKEN_MODE -eq 'add' -and (Test-Path -LiteralPath $tokenFile)) { $mode = 'add' }
+    $existing = @()
+    if ($mode -eq 'add') { $existing = @(Read-DevStoreTokens -Root $Root) }
+    $list = @(Set-DevStoreTokenEntry -List $existing -Login $login -Token $token -Mode $mode)
+    Write-DevStoreTokens -Root $Root -List $list
+    $who = 'this account'
+    if ($login) { $who = "GitHub account '$login'" }
+    if ($mode -eq 'add') { Write-Output "Added $who. DevStore now uses $($list.Count) accounts." }
+    else { Write-Output "Token OK for $who and stored (encrypted for this machine)." }
 }
 & icacls.exe $tokenFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' /C /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Locking down $tokenFile failed (icacls exit $LASTEXITCODE)." }

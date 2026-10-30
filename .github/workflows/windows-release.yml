@@ -177,11 +177,36 @@ jobs:
           if ($m.PSObject.Properties['description'] -and $m.description) { $desc = [string]$m.description }
           [ordered]@{ name = $m.name; displayName = $display; description = $desc; type = $m.type; version = $m.version } |
             ConvertTo-Json | Set-Content -Path (Join-Path $store 'store.json') -Encoding utf8
-          if ($m.PSObject.Properties['icon'] -and $m.icon) { Copy-Item $m.icon (Join-Path $store 'store-icon.png') }
-          $n = 0
-          if ($m.PSObject.Properties['screenshots']) {
-            foreach ($f in @($m.screenshots | Select-Object -First 6)) { $n++; Copy-Item $f (Join-Path $store "store-screenshot-$n.png") }
+          # Icon and screenshots: from devstore.json if listed, otherwise found in
+          # the usual places in the app folder or at the repo root.
+          $roots = @('.', $env:GITHUB_WORKSPACE) | Select-Object -Unique
+          $icon = $null
+          if ($m.PSObject.Properties['icon'] -and $m.icon) { $icon = $m.icon }
+          else {
+            foreach ($r in $roots) {
+              foreach ($c in 'store/icon.png', 'icon.png', 'assets/icon.png', 'docs/icon.png') {
+                $p = Join-Path $r $c
+                if (-not $icon -and (Test-Path $p)) { $icon = $p }
+              }
+            }
           }
+          if ($icon) { Copy-Item $icon (Join-Path $store 'store-icon.png'); Write-Output "Store icon: $icon" }
+          $shots = @()
+          if ($m.PSObject.Properties['screenshots']) { $shots = @($m.screenshots) }
+          else {
+            foreach ($r in $roots) {
+              foreach ($d in 'store/screenshots', 'screenshots', 'docs/screenshots', 'store') {
+                $dir = Join-Path $r $d
+                if ($shots.Count -eq 0 -and (Test-Path $dir -PathType Container)) {
+                  $shots = @(Get-ChildItem $dir -Filter '*.png' -File | Where-Object { $_.Name -notmatch '^icon' } |
+                    Sort-Object Name | ForEach-Object { $_.FullName })
+                }
+              }
+            }
+          }
+          $n = 0
+          foreach ($f in @($shots | Select-Object -First 6)) { $n++; Copy-Item $f (Join-Path $store "store-screenshot-$n.png") }
+          if ($n) { Write-Output "Store screenshots: $n" }
           "STORE_DIR=$store" >> $env:GITHUB_ENV
 
       - name: Publish GitHub Release

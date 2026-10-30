@@ -40,7 +40,7 @@ def test_installed_up_to_date_gui_app():
     assert a["installed"] is True
     assert a["status"]["kind"] == "ok" and a["status"]["text"] == "Installed · up to date"
     assert a["actions"] == ["open", "data", "remove"]
-    assert v["counts"] == {"installed": 1, "attention": 0}
+    assert v["counts"]["installed"] == 1 and v["counts"]["attention"] == 0
 
 
 def test_config_app_without_state_is_installing():
@@ -171,3 +171,45 @@ def test_manager_can_restart_itself_after_an_update():
     a = app(store.build_view({"apps": [{"repo": "qawalah/DevStore"}]}, st, {}, {}, {}, NOW,
                              running={"devstore-manager"}), "qawalah/DevStore")
     assert a["actions"] == ["relaunch", "data"]
+
+
+def test_update_available_and_ready_offer_an_update_button():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.0.0", "latest": "1.1.0", "status": "available"},
+                   "qawalah/u": {"name": "u", "type": "gui", "installed": "1.0.0", "latest": "1.1.0", "status": "ready"}}}
+    cfg = {"apps": [{"repo": "qawalah/t", "updates": "notify"}, {"repo": "qawalah/u", "updates": "download"}]}
+    v = view(config=cfg, state=st)
+    t, u = app(v, "qawalah/t"), app(v, "qawalah/u")
+    assert t["status"]["kind"] == "update" and t["status"]["text"] == "Update available: 1.1.0"
+    assert t["actions"][0] == "update"
+    assert u["status"]["text"] == "Update downloaded: 1.1.0, ready to install"
+    assert u["actions"][0] == "update"
+    assert t["updates"] == "notify" and u["updates"] == "download"
+    assert v["counts"]["updates"] == 2
+
+
+def test_update_mode_falls_back_to_default():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.0.0", "status": "ok"}}}
+    v = view(config={"apps": [{"repo": "qawalah/t"}], "defaultUpdates": "download"}, state=st)
+    assert app(v, "qawalah/t")["updates"] == "download"
+    assert app(v, "qawalah/t")["updatesIsDefault"] is True
+    assert v["settings"]["defaultUpdates"] == "download"
+    assert view()["settings"]["defaultUpdates"] == "auto"
+
+
+def test_shared_apps_are_marked_and_counted():
+    cat = {"apps": {"alialyami90/JIC": {"repo": "alialyami90/JIC", "name": "jic", "displayName": "JIC", "latest": "1.0.0",
+                                        "type": "gui", "owner": "alialyami90", "shared": True},
+                    "qawalah/Tool": {"repo": "qawalah/Tool", "name": "tool", "latest": "1.0.0", "type": "gui",
+                                     "owner": "qawalah", "shared": False}},
+           "account": "qawalah"}
+    v = view(cat=cat, state={"accounts": ["qawalah", "alialyami90"]})
+    assert app(v, "alialyami90/JIC")["shared"] is True and app(v, "alialyami90/JIC")["owner"] == "alialyami90"
+    assert app(v, "qawalah/Tool")["shared"] is False
+    assert v["counts"]["shared"] == 1
+    assert v["settings"]["accounts"] == ["qawalah", "alialyami90"]
+
+
+def test_latest_is_the_newest_known_version():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.0.0", "latest": "1.10.0", "status": "ready"}}}
+    v = view(config={"apps": [{"repo": "qawalah/t"}]}, state=st, cat=catalog(**{"qawalah/t": {"latest": "1.9.0"}}))
+    assert app(v, "qawalah/t")["latest"] == "1.10.0"

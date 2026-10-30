@@ -27,6 +27,10 @@ Updater on the user's Windows PC installs within about 10 minutes.
   - `icon`: a square PNG in the repo (256×256 is ideal), for example
     `"store/icon.png"`.
   - `screenshots`: up to 6 PNGs, for example `["store/1.png", "store/2.png"]`.
+  - Without `icon`/`screenshots`, the build looks for `store/icon.png` (or
+    `icon.png`, `assets/icon.png`) and for PNGs in `store/screenshots/`,
+    `screenshots/` or `docs/screenshots/`, in the app folder or at the repo
+    root.
 - Optional:
   - `data` (Python only): folders the app reads at runtime, bundled at the
     same path, for example `["web"]`.

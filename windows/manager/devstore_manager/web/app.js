@@ -10,6 +10,7 @@ const ICONS = {
   warn: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5v.01"/></svg>',
   error: '<svg viewBox="0 0 24 24"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5"/><path d="M12 17.5v.01"/></svg>',
   none: "",
+  update: '<svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 10.5 5 5 5-5"/><path d="M5 19.5h14"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 10.5 5 5 5-5"/><path d="M5 19.5h14"/></svg>',
   open: '<svg viewBox="0 0 24 24"><path d="M14 5h5v5"/><path d="m19 5-8 8"/><path d="M17 14v5H5V7h5"/></svg>',
@@ -23,6 +24,7 @@ const ICONS = {
 
 const ACTIONS = {
   install: { label: "Install", icon: "download", cls: "btn-primary", call: (r) => api().install(r) },
+  update: { label: "Update", icon: "download", cls: "btn-primary", call: (r) => api().update(r) },
   open: { label: "Open", icon: "open", cls: "btn-primary", call: (r) => api().open_app(r) },
   start: { label: "Start", icon: "play", cls: "btn-primary", call: (r) => api().service(r, "Start") },
   stop: { label: "Stop", icon: "stop", cls: "btn-quiet", call: (r) => api().service(r, "Stop") },
@@ -81,8 +83,10 @@ function stateHtml(st, short = false) {
 
 function buttonHtml(action, repo, opts = {}) {
   const a = ACTIONS[action];
-  const text = opts.compact ? "" : `<span>${a.label}</span>`;
-  const title = opts.compact ? ` title="${a.label}" aria-label="${a.label}"` : "";
+  const app = view && view.apps.find((x) => x.repo === repo);
+  const label = action === "update" && app && app.status.text.startsWith("Update downloaded") ? "Install update" : a.label;
+  const text = opts.compact ? "" : `<span>${label}</span>`;
+  const title = opts.compact ? ` title="${label}" aria-label="${label}"` : "";
   return `<button class="btn ${a.cls}" data-action="${action}" data-repo="${esc(repo)}"${title}>${ICONS[a.icon]}${text}</button>`;
 }
 
@@ -113,11 +117,14 @@ function render() {
   }
   renderUpdater(view.updater);
   $("#count-installed").textContent = view.counts.installed || "";
+  $("#count-shared").textContent = view.counts.shared || "";
   renderBanner();
-  $(".search").hidden = route.name === "app" || route.name === "activity";
+  $(".search").hidden = ["app", "activity", "settings"].includes(route.name);
   $(".topbar").hidden = route.name === "app";
   if (route.name === "discover") renderDiscover(v);
   else if (route.name === "installed") renderInstalled(v);
+  else if (route.name === "shared") renderShared(v);
+  else if (route.name === "settings") renderSettings(v);
   else if (route.name === "activity") renderActivity(v);
   else if (route.name === "app") renderApp(v);
 }
@@ -143,8 +150,8 @@ function renderBanner() {
 
 function renderDiscover(v) {
   $("#view-title").textContent = "Discover";
-  const apps = view.apps.filter((a) => !a.isSelf && matches(a));
-  if (!view.apps.some((a) => !a.isSelf)) {
+  const apps = view.apps.filter((a) => !a.isSelf && !a.shared && matches(a));
+  if (!view.apps.some((a) => !a.isSelf && !a.shared)) {
     v.innerHTML = emptyHtml("No Windows apps found yet",
       "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within 10 minutes.") + addHtml();
     return;
@@ -162,13 +169,68 @@ function addHtml() {
 }
 
 function cardHtml(a) {
-  const primary = a.actions.find((x) => ["install", "open", "start", "relaunch"].includes(x));
-  const meta = [a.type, a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`].filter(Boolean).join(" · ");
+  const primary = a.actions.find((x) => ["update", "install", "open", "start", "relaunch"].includes(x));
+  const meta = [a.type, a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`, a.shared && `by ${a.owner}`]
+    .filter(Boolean).join(" · ");
   return `<article class="card" data-goto="${esc(a.repo)}" tabindex="0">
     <div class="card-head">${iconHtml(a)}<div style="min-width:0"><div class="card-name">${esc(a.displayName)}</div><div class="card-meta">${esc(meta)}</div></div></div>
     <p class="card-desc">${esc(a.description || "No description yet.")}</p>
     <div class="card-foot">${stateHtml(a.status, true)}${primary ? buttonHtml(primary, a.repo) : ""}</div>
   </article>`;
+}
+
+function renderShared(v) {
+  $("#view-title").textContent = "Shared with you";
+  const apps = view.apps.filter((a) => a.shared && matches(a));
+  if (!view.apps.some((a) => a.shared)) {
+    v.innerHTML = emptyHtml("No shared apps yet",
+      "Apps from repos owned by other people (where you're a collaborator) show up here. " +
+      "Ask the repo's owner to create a read-only token for you, then run <strong>DevStoreSetup.exe</strong> " +
+      "and tick <em>Add as another GitHub account</em>.");
+    return;
+  }
+  if (!apps.length) { v.innerHTML = emptyHtml("No matches", `Nothing matches “${esc(search)}”.`); return; }
+  v.innerHTML = `<div class="grid">${apps.map(cardHtml).join("")}</div>`;
+}
+
+const MODES = [
+  ["auto", "Automatically", "Download and install updates by themselves."],
+  ["download", "Download, I'll install", "Download updates, then wait for you to click Install update."],
+  ["notify", "Just tell me", "Only show that an update exists. Nothing is downloaded until you click Update."],
+];
+
+function modeSelect(id, value, withDefault) {
+  const opts = (withDefault ? [["default", `Use my default (${MODES.find((m) => m[0] === view.settings.defaultUpdates)[1]})`]] : [])
+    .concat(MODES.map((m) => [m[0], m[1]]));
+  return `<select class="select" id="${id}">${opts.map(([k, label]) =>
+    `<option value="${k}"${k === value ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+}
+
+function renderSettings(v) {
+  $("#view-title").textContent = "Settings";
+  const st = view.settings;
+  const loc = st.locations || {};
+  const folder = (kind, title, sub) => `<div class="fact"><span><strong>${title}</strong><br><span class="muted">${esc(sub)}</span></span>
+    <span><button class="btn btn-quiet" data-open="${kind}">${ICONS.folder}<span>Open</span></button></span></div>`;
+  const accounts = st.accounts.length ? st.accounts.map((a, i) => `<div class="fact"><span>${esc(a)}</span><span class="muted">${i ? "Shared apps" : "Main account"}</span></div>`).join("")
+    : `<div class="fact"><span class="muted">Shown after the next check.</span><span></span></div>`;
+  v.innerHTML = `<div class="settings">
+    <section><h2>Updates</h2>
+      <p class="muted">What DevStore does when one of your apps has a new version. You can change this per app on its page.</p>
+      ${modeSelect("default-mode", st.defaultUpdates, false)}
+      <p class="muted" id="mode-help">${esc(MODES.find((m) => m[0] === st.defaultUpdates)[2])}</p></section>
+    <section><h2>Where things are</h2><div class="facts">
+      ${folder("programs", "Programs", (loc.programs || "") + "\\<app name>")}
+      ${folder("data", "App data", (loc.data || "") + "\\<app name>  (kept when an app is removed)")}
+      ${folder("logs", "DevStore logs", loc.logs || "")}</div></section>
+    <section><h2>GitHub accounts</h2><div class="facts">${accounts}</div>
+      <p class="muted">To add apps from someone else's repo, ask them for a read-only token, then run DevStoreSetup.exe and tick <em>Add as another GitHub account</em>.</p></section>
+    <p class="muted">DevStore ${esc(st.version || "")}</p></div>`;
+  $("#default-mode").addEventListener("change", async (e) => {
+    const res = await api().set_updates(null, e.target.value);
+    toast(res.message, res.ok);
+    load();
+  });
 }
 
 function renderInstalled(v) {
@@ -219,7 +281,7 @@ async function renderApp(v) {
   v.innerHTML = `
     <button class="link detail-back" data-nav="${route.from || "discover"}">${ICONS.back}<span>Back</span></button>
     <div class="detail-head">${iconHtml(a, "lg")}
-      <div><h1 class="detail-title">${esc(a.displayName)}</h1><div class="detail-sub">${esc(a.type || "App")} · ${esc(a.repo)}</div></div>
+      <div><h1 class="detail-title">${esc(a.displayName)}</h1><div class="detail-sub">${esc(a.type || "App")} · ${esc(a.repo)}${a.shared ? ` · shared by ${esc(a.owner)}` : ""}</div></div>
       <div class="detail-actions">${a.actions.filter((x) => !SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div>
     </div>
     ${notice}
@@ -228,8 +290,14 @@ async function renderApp(v) {
       <div><h2 style="margin-top:0">About</h2><p class="about">${esc(a.description || "No description yet. Add one to devstore.json in the app's repo.")}</p>
         <h2>Activity</h2><div class="log" id="app-log">Loading…</div></div>
       <aside><div class="facts">${facts}</div>
+        <label class="field-label" for="app-mode">Updates</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}
         <div class="side-actions">${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
     </div>`;
+  $("#app-mode").addEventListener("change", async (e) => {
+    const res = await api().set_updates(a.repo, e.target.value);
+    toast(res.message, res.ok);
+    load();
+  });
   const d = await api().get_details(a.repo);
   if (route.name !== "app" || route.repo !== a.repo) return;
   $("#shots").innerHTML = d.screenshots.map((s) => `<img src="${s}" alt="Screenshot of ${esc(a.displayName)}">`).join("");
@@ -270,6 +338,8 @@ async function runAction(btn) {
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (btn) { e.stopPropagation(); runAction(btn); return; }
+  const open = e.target.closest("[data-open]");
+  if (open) { api().open_location(open.dataset.open).then((r) => toast(r.message, r.ok)); return; }
   const nav = e.target.closest("[data-nav]");
   if (nav) { go(nav.dataset.nav); return; }
   const item = e.target.closest(".nav-item");
