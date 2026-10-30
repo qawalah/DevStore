@@ -1,3 +1,3 @@
 # Has no HEALTHCHECK: the smoke test must refuse it.
-FROM busybox:1.37
+FROM mirror.gcr.io/library/busybox:1.37
 CMD ["sleep", "3600"]

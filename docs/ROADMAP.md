@@ -13,8 +13,11 @@ Ideas agreed for later. Not built yet.
 ## Later
 - **Choose the install folder** (for example another drive) in setup and
   Settings. Today apps always go to `C:\DevStore\apps`.
-- **Docker apps** on the PC or a server (the Werd server has Docker files):
-  images in GitHub's registry, updated by a Watchtower fork.
+- **Docker versions in the Manager.** For each Docker app, show the newest
+  version (from its empty `docker-v…` releases, read with the token the
+  Manager already has) and the version the NAS runs (from the app's own
+  endpoint, for example Werd's `GET /v1/info`, which needs no login).
+  Docker apps on the NAS themselves are done: see `docs/nas-setup.md`.
 - **Code signing** for the exe files, to avoid Windows SmartScreen and
   antivirus warnings.
 - **Android apps in the store window** (read-only list of phone apps and their

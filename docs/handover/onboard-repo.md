@@ -23,7 +23,9 @@ exist, use section 3c.
 
 From `HANDOVER.md` and the files: **Android** (has `gradlew` and an Android
 module) or **Windows** (Python or Go; gui or service). If the repo has both an
-Android app and a Windows companion, set up both.
+Android app and a Windows companion, set up both. A server that should run on
+the user's NAS (it has, or should have, a `Dockerfile`) is **Docker**: section
+3d, on top of the other parts.
 
 ## 3a. Android
 1. Copy from DevStore `templates/app-repo/`: `.github/workflows/release.yml`,
@@ -69,6 +71,32 @@ part, with one `CLAUDE.md` that has both sets of rules. Each part releases
 when its own version is bumped. In Obtainium, filter the repo's releases
 with `^android-`.
 
+## 3d. Docker (a server for the NAS)
+The image is built on GitHub, published privately to
+`ghcr.io/qawalah/<name>`, and installed on the NAS by Watchtower (DevStore
+`docs/nas-setup.md`). The NAS is Intel (`linux/amd64`).
+1. Next to the `Dockerfile`, keep a `devstore.json` with `name`
+   (lowercase-with-dashes; it becomes the image name) and `version`. A
+   Windows part can share the same file, and then one bump releases both.
+2. Add a `docker` job to `.github/workflows/release.yml` (see the commented
+   job in DevStore `templates/app-repo-both/.github/workflows/release.yml`),
+   with `working-directory:` pointing at that folder. Give the job
+   `contents: write` and `packages: write`.
+3. The `Dockerfile` must:
+   - have a `HEALTHCHECK`, since the release is only published once the
+     image reports healthy;
+   - take `ARG VERSION` and use it (for example `-X main.version=${VERSION}`)
+     instead of a hard-coded version;
+   - build from the repo alone: no git-ignored `dist/`, and downloads pinned
+     with a checksum (`ADD --checksum=sha256:…`);
+   - keep data in a `VOLUME` and bake in no secrets.
+4. Add a `docker-compose.yml` for the NAS with
+   `image: ghcr.io/qawalah/<name>:latest`, `pull_policy: always`, the label
+   `com.centurylinklabs.watchtower.enable=true`, and the data folder mounted
+   as `./data`.
+5. If Docker is available, run
+   `docker build --build-arg VERSION=<version> -t test .` and start it once.
+
 ## 4. Finish
 1. Keep `HANDOVER.md` in the repo.
 2. Commit everything, with a message like "Onboard into DevStore", and push
@@ -80,6 +108,12 @@ with `^android-`.
      DevStore `docs/handover/README.md` step 3,
    - "workflow not found": the DevStore Actions access setting isn't
      enabled; ask the user to enable it (README one-time step 2),
-   - compile errors: fix them.
+   - compile errors: fix them,
+   - Docker "has no HEALTHCHECK" or "was not healthy": fix the Dockerfile or
+     the app's start-up; the container log is printed above the error,
+   - Docker "GitHub refused to delete old versions": the release is out, but
+     ask the user to add a repo secret `GHCR_CLEANUP_TOKEN` (a classic token
+     with `read:packages` and `delete:packages`).
 4. Tell the user the release tag and the next step: install it through
-   Obtainium (Android) or add the repo in DevStore Manager (Windows).
+   Obtainium (Android), add the repo in DevStore Manager (Windows), or copy
+   its `docker-compose.yml` to the NAS (Docker, DevStore `docs/nas-setup.md`).

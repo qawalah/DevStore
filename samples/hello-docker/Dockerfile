@@ -1,6 +1,6 @@
 # Tiny sample for the Docker pipeline: BusyBox httpd serving one page, with the
 # HEALTHCHECK that every DevStore Docker app needs (the release waits for it).
-FROM busybox:1.37
+FROM mirror.gcr.io/library/busybox:1.37
 ARG VERSION=dev
 RUN mkdir -p /www && echo "hello-docker $VERSION" > /www/index.html
 EXPOSE 8080

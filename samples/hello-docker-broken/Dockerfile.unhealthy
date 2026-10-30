@@ -1,4 +1,4 @@
 # Never turns healthy: the smoke test must refuse it.
-FROM busybox:1.37
+FROM mirror.gcr.io/library/busybox:1.37
 HEALTHCHECK --interval=30s --retries=1 CMD exit 1
 CMD ["sleep", "3600"]

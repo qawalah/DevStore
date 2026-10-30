@@ -23,3 +23,13 @@ jobs:
     uses: qawalah/devstore/.github/workflows/windows-release.yml@main
     with:
       working-directory: server   # the folder that holds devstore.json
+
+  # If the server also runs on the NAS in Docker (see docs/handover/onboard-repo.md 3d):
+  # docker:
+  #   uses: qawalah/devstore/.github/workflows/docker-release.yml@main
+  #   permissions:
+  #     contents: write           # tag and release docker-v...
+  #     packages: write           # push to ghcr.io and delete old versions
+  #   secrets: inherit
+  #   with:
+  #     working-directory: server # devstore.json and Dockerfile
