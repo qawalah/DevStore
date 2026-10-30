@@ -1,12 +1,17 @@
-"""Things the DevStore Manager does to the system. Changes go through the
-agent scripts in C:\\DevStore\\agent, run elevated (one UAC prompt each),
-because the Manager itself runs as a normal user with read-only access."""
+"""Things the DevStore Manager does to the system.
+
+Installing, removing and checking need no admin rights: the Manager drops a
+request file in C:\\DevStore\\requests and starts the "DevStore Updater" task,
+which applies it as SYSTEM. Service start/stop still asks for admin (UAC)."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(os.environ.get("DEVSTORE_ROOT", r"C:\DevStore"))
@@ -76,19 +81,63 @@ def run_elevated(script: str, **params: str) -> None:
         raise ActionFailed(f"{script} failed (exit code {code}). Details are in {LOG_DIR}.")
 
 
-def check_now() -> None:
-    run_elevated("Start-DevStoreCheck.ps1")
+TASK_NAME = "DevStore Updater"
 
 
-def add_app(repo: str) -> None:
+def start_updater() -> bool:
+    """Starts the updater task now. Normal users may do this (the updater grants it)."""
+    try:
+        r = subprocess.run(["schtasks.exe", "/run", "/tn", TASK_NAME], capture_output=True, text=True,
+                           timeout=15, creationflags=_CREATE_NO_WINDOW)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _write_request(action: str, repo: str | None = None) -> None:
+    folder = ROOT / "requests"
+    body = {"action": action} if repo is None else {"action": action, "repo": repo}
+    name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    tmp = folder / f"{name}.tmp"
+    tmp.write_text(json.dumps(body), encoding="utf-8")
+    tmp.replace(folder / f"{name}.json")  # the updater only reads *.json, never half-written files
+
+
+def pending_requests() -> dict[str, str]:
+    """repo -> 'install'/'remove' for requests the updater hasn't applied yet."""
+    out: dict[str, str] = {}
+    try:
+        files = sorted((ROOT / "requests").glob("*.json"))
+    except OSError:
+        return out
+    for f in files:
+        try:
+            body = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(body, dict) and body.get("action") in ("install", "remove") and REPO_RE.match(str(body.get("repo", ""))):
+            out[body["repo"]] = body["action"]
+    return out
+
+
+def install(repo: str) -> None:
     repo = repo.strip()
     if not REPO_RE.match(repo):
         raise ValueError("Enter the repo as owner/name, for example qawalah/my-app.")
-    run_elevated("Add-DevStoreApp.ps1", Repo=repo)
+    _write_request("install", repo)
+    start_updater()
 
 
-def remove_app(repo: str) -> None:
-    run_elevated("Remove-DevStoreApp.ps1", Repo=repo)
+def remove(repo: str) -> None:
+    if not REPO_RE.match(repo):
+        raise ValueError(f"Can't remove {repo!r}.")
+    _write_request("remove", repo)
+    start_updater()
+
+
+def check_now() -> None:
+    if not start_updater():
+        run_elevated("Start-DevStoreCheck.ps1")  # older install: the task isn't startable without admin yet
 
 
 def service_action(name: str, action: str) -> None:

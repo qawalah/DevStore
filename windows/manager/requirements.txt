@@ -1,1 +1,1 @@
-# No third-party dependencies: tkinter ships with Python.
+pywebview>=5.3,<7

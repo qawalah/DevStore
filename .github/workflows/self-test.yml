@@ -43,12 +43,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest -r windows/manager/requirements.txt
       - run: python -m pytest -v
         working-directory: windows/manager
-      - name: Manager imports with tkinter
+      - name: Manager window code loads on Windows
         working-directory: windows/manager
-        run: python -c "import devstore_manager.ui"
+        run: python -c "import webview, devstore_manager.ui, devstore_manager.api; print('pywebview', webview.__version__ if hasattr(webview, '__version__') else '?')"
       - name: Setup installer tests
         working-directory: windows/setup
         run: python -m pytest -v

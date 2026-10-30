@@ -55,6 +55,12 @@ jobs:
               elseif (-not (Test-Path $i)) { $errors += "include path not found: '$i'" }
             }
           }
+          if ($m.PSObject.Properties['data']) {
+            foreach ($d in @($m.data)) {
+              if ($lang -ne 'python') { $errors += "data is for Python apps; use include for '$d'" }
+              elseif ([IO.Path]::IsPathRooted($d) -or $d -match '\.\.' -or -not (Test-Path $d)) { $errors += "data path not found or outside the folder: '$d'" }
+            }
+          }
           if ($m.PSObject.Properties['prepare'] -and $m.prepare -and -not (Test-Path $m.prepare)) { $errors += "prepare script not found: '$($m.prepare)'" }
           # Optional store listing: "description", "icon" (PNG) and "screenshots" (PNGs, up to 6).
           $pngs = @()
@@ -93,6 +99,9 @@ jobs:
           $pyiArgs = @('--noconfirm', '--clean', '--onedir', '--name', $env:APP_NAME)
           if ($env:APP_TYPE -eq 'gui') { $pyiArgs += '--noconsole' }
           if (Test-Path icon.ico) { $pyiArgs += @('--icon', 'icon.ico') }
+          # "data": folders the app reads at runtime (bundled at the same relative path).
+          $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          if ($m.PSObject.Properties['data']) { foreach ($d in @($m.data)) { $pyiArgs += @('--add-data', "$d;$d") } }
           python -m PyInstaller @pyiArgs $env:APP_ENTRY
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
