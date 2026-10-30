@@ -17,7 +17,11 @@ function Select-DevStoreRelease {
     param($Releases, [string[]]$Bad = @())
     $best = $null
     $bestVersion = $null
-    foreach ($r in @($Releases)) {
+    # Flatten one level: Windows PowerShell 5.1 can hand over [[release, ...]].
+    $flat = foreach ($x in @($Releases)) {
+        if ($x -is [System.Array]) { foreach ($y in $x) { $y } } else { $x }
+    }
+    foreach ($r in @($flat)) {
         if ($null -eq $r -or $r.draft -or $r.prerelease) { continue }
         $v = ConvertFrom-DevStoreTag $r.tag_name
         if ($null -eq $v) { continue }

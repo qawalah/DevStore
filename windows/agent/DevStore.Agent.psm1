@@ -61,7 +61,10 @@ function Get-DevStoreReleases {
     }
     $uri = "https://api.github.com/repos/$Repo/releases?per_page=30"
     try {
-        return @(Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -UseBasicParsing)
+        $resp = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -UseBasicParsing
+        $list = New-Object System.Collections.ArrayList
+        foreach ($r in $resp) { [void]$list.Add($r) }   # foreach unrolls 5.1's single-array output
+        return $list.ToArray()
     }
     catch {
         $code = $null

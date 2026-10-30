@@ -42,6 +42,10 @@ Describe 'Select-DevStoreRelease' {
         $r += New-Release 'windows-v1.3.0'
         (Select-DevStoreRelease -Releases $r -Bad @('1.2.0')).tag_name | Should -Be 'windows-v1.3.0'
     }
+    It 'copes with a list nested inside a list (Windows PowerShell 5.1 Invoke-RestMethod)' {
+        $inner = @((New-Release 'windows-v1.0.0'), (New-Release 'windows-v1.2.0'))
+        (Select-DevStoreRelease -Releases @(, $inner) -Bad @()).tag_name | Should -Be 'windows-v1.2.0'
+    }
     It 'returns null when nothing qualifies' {
         Select-DevStoreRelease -Releases @() -Bad @() | Should -BeNullOrEmpty
         Select-DevStoreRelease -Releases @((New-Release 'android-v1+1')) -Bad @() | Should -BeNullOrEmpty
