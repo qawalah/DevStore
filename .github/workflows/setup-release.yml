@@ -38,7 +38,7 @@ jobs:
           # Bundle the agent scripts (not their tests) as the installer's payload.
           New-Item -ItemType Directory -Path payload -Force | Out-Null
           Get-ChildItem ../agent -File | Where-Object { $_.Extension -in '.ps1', '.psm1' } | Copy-Item -Destination payload
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --uac-admin --name DevStoreSetup `
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --uac-admin --name DevStoreSetup --icon icon.ico `
             --add-data "payload;agent" --add-data "version.txt;." setup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path dist/DevStoreSetup.exe)) { Write-Output "::error::DevStoreSetup.exe was not produced"; exit 1 }
