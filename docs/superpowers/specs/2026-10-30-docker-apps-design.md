@@ -121,7 +121,12 @@ Otherwise cleanup uses the workflow's own token. Callers pass
 `secrets: inherit`.
 
 **Permissions the caller must grant:** `contents: write` (tag and Release)
-and `packages: write` (push and delete).
+and `packages: write` (push and delete), on the `docker` job.
+
+**Queueing:** publishing runs for one app (repo plus folder) share a
+`concurrency` group with `cancel-in-progress: false`. Two quick version bumps
+then publish in push order, so `latest` can't end on the older one. Build-only
+runs never wait.
 
 **Steps:**
 1. **Read `devstore.json`.** `name` must match `^[a-z0-9-]+$` and `version`
@@ -147,8 +152,11 @@ and `packages: write` (push and delete).
    - The container's log is printed either way.
    - This step uses only environment variables (`IMAGE`, `HEALTH_TIMEOUT`),
      so the self-test can run the same script (§3.2).
-5. **Push:** log in to `ghcr.io` with the workflow token, push
-   `:<version>`, then tag and push `:latest`. Watchtower only follows
+5. **Push:** log in to `ghcr.io` with the workflow token and push
+   `:<version>`. Check that the registry holds a single image manifest, not
+   an index whose untagged children cleanup would delete. The build uses
+   `--provenance=false --sbom=false`, because a default BuildKit build pushes
+   an index. Only then tag and push `:latest`. Watchtower only follows
    `latest`, so the NAS sees nothing until this step.
 6. **Tag and Release:** create `docker-v<version>` on the built commit with
    `gh release create --latest=false`. The title is
@@ -192,7 +200,8 @@ and `packages: write` (push and delete).
 
 ### 3.3 Changes in `qawalah/werd`
 - **`server/Dockerfile`**, three stages:
-  1. **build:** `golang:1.26-alpine` builds `/werd-server` from source with
+  1. **build:** `mirror.gcr.io/library/golang:1.26-alpine` builds
+     `/werd-server` from source with
      `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"`.
   2. **engine:** `ADD --checksum=sha256:<sum>` fetches the pinned llama.cpp
      archive, which is unpacked. `llama-server`, `libllama-server-impl.so`
@@ -207,7 +216,9 @@ and `packages: write` (push and delete).
 
   It keeps `ENV`, `VOLUME /data`, `EXPOSE 8080`, the `HEALTHCHECK` and the
   `ENTRYPOINT`, and drops the hard-coded version `LABEL`, since the workflow
-  sets it.
+  sets it. Every base image comes from Google's registries (`mirror.gcr.io`,
+  `gcr.io`), as before, so Docker Hub's pull limits can't fail a release. The
+  samples use `mirror.gcr.io/library/busybox` for the same reason.
 - **`server/docker-compose.yml`:**
   - `build:` and `pull_policy: build` become
     `image: ghcr.io/qawalah/werd-server:latest` with `pull_policy: always`.
@@ -219,7 +230,8 @@ and `packages: write` (push and delete).
   the Linux binaries.
 - **`.github/workflows/release.yml`:** adds a `docker` job
   (`docker-release.yml@main`, `working-directory: server`,
-  `secrets: inherit`) and `packages: write`.
+  `secrets: inherit`) with `contents: write` and `packages: write` on that
+  job only.
 - **Docs:**
   - `CLAUDE.md` gets a Docker section: the same version bump publishes the
     image; keep the `HEALTHCHECK`; the engine pin must match `gpu.go`; no

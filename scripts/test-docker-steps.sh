@@ -70,9 +70,21 @@ test_smoke() {
   echo "OK smoke (4 images)"
 }
 
+# Two quick version bumps must not race: publishing runs for one app queue in
+# push order, or the older one could move latest last.
+test_queue() {
+  local c
+  c=$(yq -r '.jobs.release.concurrency | (.group // "") + " cancel=" + (.["cancel-in-progress"] | tostring)' "$WF")
+  case "$c" in
+    *"github.repository"*"inputs.working-directory"*" cancel=false") echo "OK publishing runs queue per app" ;;
+    *) echo "FAIL: release job needs a concurrency group per repo and folder, cancel-in-progress false (got: $c)"; exit 1 ;;
+  esac
+}
+
 case "${1:-all}" in
   cleanup) test_cleanup ;;
   smoke) test_smoke ;;
-  all) test_cleanup; test_smoke ;;
-  *) echo "usage: $0 cleanup|smoke|all"; exit 2 ;;
+  queue) test_queue ;;
+  all) test_queue; test_cleanup; test_smoke ;;
+  *) echo "usage: $0 cleanup|smoke|queue|all"; exit 2 ;;
 esac

@@ -43,6 +43,11 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Publishing runs for one app wait for each other, so latest always ends on the newest
+    # push. Build-only runs (publish: false, like the self-test) never wait.
+    concurrency:
+      group: ${{ inputs.publish && format('devstore-docker-{0}-{1}', github.repository, inputs.working-directory) || format('devstore-docker-check-{0}', github.run_id) }}
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
