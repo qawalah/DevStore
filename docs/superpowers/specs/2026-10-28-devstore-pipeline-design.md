@@ -431,3 +431,15 @@ Administrators.
 service info, status mapping, log filtering, and tolerating missing or
 corrupt `state.json`. pytest for `actions.py`, checking the exact
 command lines with `subprocess` mocked. The UI is checked by hand on the PC.
+
+## 14. Go apps (added after the first Windows design)
+
+`windows-release.yml` also builds **Go** apps. `devstore.json` gets an
+optional `"language": "python" | "go"` (default `python`). For Go, `entry` is
+the package to build (default `.`) and `go.mod` must sit next to
+`devstore.json`. The build is `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go
+build -trimpath -ldflags "-s -w -X main.version=<version>"` into
+`<name>.exe` (plus `-H=windowsgui` for `gui` apps). The result is packaged,
+hashed and released exactly like a Python build, so the PC-side updater and
+the Manager need no change. Covered by `samples/hello-windows-go` in the
+self-test.

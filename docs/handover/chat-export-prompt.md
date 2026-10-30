@@ -17,6 +17,8 @@ Claude Code and released automatically. Please package it for handover:
      and `gradle/wrapper/` (generate the wrapper if it's missing).
    - **Python projects:** include `requirements.txt` listing every
      third-party dependency.
+   - **Go projects:** include `go.mod` and `go.sum`, and tell me the main
+     package folder and the exe name.
    - **Don't include** build outputs (`build/`, `dist/`, `.gradle/`,
      `__pycache__/`), APKs or EXEs, keystores (`*.jks`, `*.keystore`),
      passwords, API keys or `local.properties`.

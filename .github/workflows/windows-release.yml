@@ -1,5 +1,5 @@
-# Reusable workflow: build a Python app with PyInstaller (onedir) and publish
-# it as a GitHub Release for the DevStore Windows updater.
+# Reusable workflow: build a Windows app (Python via PyInstaller, or Go) and
+# publish it as a GitHub Release for the DevStore Windows updater.
 # App repos call it from templates/windows-app-repo/.github/workflows/release.yml.
 name: DevStore Windows release
 
@@ -30,38 +30,70 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ inputs.python-version }}
-
       - name: Read devstore.json
         run: |
           if (-not (Test-Path devstore.json)) { Write-Output "::error::devstore.json not found in ${{ inputs.working-directory }}"; exit 1 }
           $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          $lang = 'python'
+          if ($m.PSObject.Properties['language'] -and $m.language) { $lang = $m.language }
           $errors = @()
           if ($m.name -notmatch '^[a-z0-9-]+$') { $errors += "name must match ^[a-z0-9-]+$ (got '$($m.name)')" }
           if ($m.type -notin @('gui', 'service')) { $errors += "type must be 'gui' or 'service' (got '$($m.type)')" }
           if ($m.version -notmatch '^\d+\.\d+\.\d+$') { $errors += "version must look like 1.2.3 (got '$($m.version)')" }
-          if (-not $m.entry -or -not (Test-Path $m.entry)) { $errors += "entry file not found: '$($m.entry)'" }
+          if ($lang -notin @('python', 'go')) { $errors += "language must be 'python' or 'go' (got '$lang')" }
+          if ($lang -eq 'python' -and (-not $m.entry -or -not (Test-Path $m.entry))) { $errors += "entry file not found: '$($m.entry)'" }
+          if ($lang -eq 'go' -and -not (Test-Path go.mod)) { $errors += "go.mod not found next to devstore.json (language is 'go')" }
           if ($errors) { $errors | ForEach-Object { Write-Output "::error::devstore.json: $_" }; exit 1 }
+          $entry = $m.entry
+          if ($lang -eq 'go' -and -not $entry) { $entry = '.' }   # Go: the package to build, e.g. ./cmd/server
           "APP_NAME=$($m.name)" >> $env:GITHUB_ENV
           "APP_TYPE=$($m.type)" >> $env:GITHUB_ENV
           "APP_VERSION=$($m.version)" >> $env:GITHUB_ENV
-          "APP_ENTRY=$($m.entry)" >> $env:GITHUB_ENV
+          "APP_ENTRY=$entry" >> $env:GITHUB_ENV
+          "APP_LANG=$lang" >> $env:GITHUB_ENV
 
-      - name: Install dependencies
+      - uses: actions/setup-python@v6
+        if: env.APP_LANG == 'python'
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - uses: actions/setup-go@v6
+        if: env.APP_LANG == 'go'
+        with:
+          go-version-file: ${{ inputs.working-directory }}/go.mod
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      - name: Build (Python, PyInstaller)
+        if: env.APP_LANG == 'python'
         run: |
           python -m pip install --upgrade pip
           if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
           python -m pip install "pyinstaller>=6,<7"
-
-      - name: Build with PyInstaller
-        run: |
           $pyiArgs = @('--noconfirm', '--clean', '--onedir', '--name', $env:APP_NAME)
           if ($env:APP_TYPE -eq 'gui') { $pyiArgs += '--noconsole' }
           if (Test-Path icon.ico) { $pyiArgs += @('--icon', 'icon.ico') }
           python -m PyInstaller @pyiArgs $env:APP_ENTRY
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build (Go)
+        if: env.APP_LANG == 'go'
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $out = Join-Path (Join-Path 'dist' $env:APP_NAME) "$($env:APP_NAME).exe"
+          $ld = "-s -w -X main.version=$($env:APP_VERSION)"
+          if ($env:APP_TYPE -eq 'gui') { $ld += ' -H=windowsgui' }
+          go build -trimpath -ldflags $ld -o $out $env:APP_ENTRY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke-check build
+        run: |
+          $exe = Join-Path "dist/$($env:APP_NAME)" "$($env:APP_NAME).exe"
+          if (-not (Test-Path $exe)) { Write-Output "::error::$exe was not produced"; exit 1 }
+
+      - name: Package
+        run: |
           $dist = Join-Path 'dist' $env:APP_NAME
           Copy-Item devstore.json $dist
           $zipName = "$($env:APP_NAME)-$($env:APP_VERSION)-win-x64.zip"
@@ -71,11 +103,6 @@ jobs:
           Set-Content -Path "$zip.sha256" -Value "$hash  $zipName" -NoNewline -Encoding ascii
           "ZIP=$zip" >> $env:GITHUB_ENV
           Write-Output "Built $zipName ($hash)"
-
-      - name: Smoke-check build
-        run: |
-          $exe = Join-Path "dist/$($env:APP_NAME)" "$($env:APP_NAME).exe"
-          if (-not (Test-Path $exe)) { Write-Output "::error::$exe was not produced"; exit 1 }
 
       - name: Publish GitHub Release
         if: inputs.publish

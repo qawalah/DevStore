@@ -1,0 +1,7 @@
+{
+  "name": "hello-windows-go",
+  "type": "service",
+  "language": "go",
+  "entry": ".",
+  "version": "1.0.0"
+}

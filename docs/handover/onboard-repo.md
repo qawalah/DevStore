@@ -15,7 +15,7 @@ with the GitHub tools when you need them, starting with its templates.
 
 ## 2. Decide the platform
 From `HANDOVER.md` and the files: **Android** (has `gradlew` and an Android
-module) or **Windows Python** (gui or service). If the repo has both an
+module) or **Windows** (Python or Go; gui or service). If the repo has both an
 Android app and a Windows companion, set up both.
 
 ## 3a. Android
@@ -32,14 +32,15 @@ Android app and a Windows companion, set up both.
 5. If an Android SDK is available, run `./gradlew assembleRelease`;
    otherwise rely on CI.
 
-## 3b. Windows (Python)
+## 3b. Windows (Python or Go)
 1. Copy from DevStore `templates/windows-app-repo/`:
    `.github/workflows/release.yml`, `CLAUDE.md`, `.gitignore`,
    `devstore.json`, plus `requirements.txt` if the project has none.
 2. Fill in `devstore.json`:
-   - `name`: lowercase-with-dashes, permanent,
+   - `name`: lowercase-with-dashes, permanent, and the same as the exe the build makes (for example `werd-server`),
+   - `language`: `python` or `go`,
    - `type`: `gui` or `service`,
-   - `entry`: the main `.py` file,
+   - `entry`: Python: the main `.py` file. Go: the main package (`.` or `./cmd/<name>`; `go.mod` must be next to `devstore.json`),
    - `version`: the current version, or `1.0.0`.
 3. Apply the rules in the template `CLAUDE.md`. Above all, move data, settings
    and logs to `%ProgramData%\<name>\`, and make services exit cleanly on

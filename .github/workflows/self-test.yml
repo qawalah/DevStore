@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dir: [samples/hello-windows-gui, samples/hello-windows-service, windows/manager]
+        dir: [samples/hello-windows-gui, samples/hello-windows-service, samples/hello-windows-go, windows/manager]
     uses: ./.github/workflows/windows-release.yml
     with:
       working-directory: ${{ matrix.dir }}
