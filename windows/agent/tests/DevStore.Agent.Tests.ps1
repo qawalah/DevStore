@@ -219,6 +219,19 @@ Describe 'Update-DevStoreApp' {
         $s.restartPending | Should -BeFalse
     }
 
+    It 'repairs a state entry that was saved as a list (bug in 1.0.0)' {
+        $rel = New-FakeRelease -Name 'hello' -Version '1.0.0' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($rel) }
+        $broken = @($null, $null, @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.0.0'; bad = @(); status = 'ok' })
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $broken -Root $Root -Token 't'
+
+        $s | Should -BeOfType [hashtable]
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be '1.0.0'
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 0
+    }
+
     It 'prunes versions older than current and previous' {
         foreach ($v in '0.8.0', '0.9.0', '1.0.0') {
             New-Item -ItemType Directory -Path (P $Root apps hello versions $v) -Force | Out-Null
@@ -256,6 +269,20 @@ Describe 'Invoke-DevStoreUpdaterRun' {
         $state.apps['qawalah/a'].lastError | Should -Match 'boom'
         $state.lastRun | Should -Not -BeNullOrEmpty
         $state.lastRunResult | Should -Match '1 error'
+    }
+
+    It 'stores only the app state even if commands leak output' {
+        Mock -ModuleName DevStore.Agent Update-DevStoreApp {
+            $null
+            'stray text'
+            @{ name = 'b'; status = 'ok'; installed = '1.0.0'; bad = @() }
+        }
+
+        Invoke-DevStoreUpdaterRun -Root $Root
+
+        $state = Read-DevStoreJson -Path (Join-Path $Root 'state.json') -Default @{}
+        $state.apps['qawalah/b'] | Should -BeOfType [hashtable]
+        $state.apps['qawalah/b'].installed | Should -Be '1.0.0'
     }
 
     It 'drops state for apps removed from config' {

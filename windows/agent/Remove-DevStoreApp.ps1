@@ -27,8 +27,9 @@ try {
 
     $key = @($state['apps'].Keys | Where-Object { $_ -ieq $Repo }) | Select-Object -First 1
     if ($key) {
-        $app = $state['apps'][$key]
-        $name = $app['name']
+        $app = Select-DevStoreHashtable $state['apps'][$key]
+        $name = $null
+        if ($app) { $name = $app['name'] }
         if ($name) {
             if ($app['type'] -eq 'service') { Uninstall-DevStoreService -Root $Root -Name $name }
             $display = $name

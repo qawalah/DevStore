@@ -150,3 +150,42 @@ Describe 'Test-DevStoreRepoName' {
         Test-DevStoreRepoName '../x/y' | Should -BeFalse
     }
 }
+
+Describe 'ConvertTo-DevStoreSafeName' {
+    It 'makes a folder-safe name from owner/repo' {
+        ConvertTo-DevStoreSafeName 'Qawalah/My.App_2' | Should -Be 'qawalah__my.app_2'
+    }
+}
+
+Describe 'ConvertFrom-DevStoreRequest' {
+    It 'accepts install, remove and check requests' {
+        (ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'qawalah/x' }).action | Should -Be 'install'
+        (ConvertFrom-DevStoreRequest @{ action = 'remove'; repo = 'qawalah/x' }).repo | Should -Be 'qawalah/x'
+        (ConvertFrom-DevStoreRequest @{ action = 'check' }).action | Should -Be 'check'
+    }
+    It 'rejects bad requests' {
+        ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'bad repo' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'delete-everything'; repo = 'qawalah/x' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest $null | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ repo = 'qawalah/x' } | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Select-DevStoreStoreAssets' {
+    It 'finds store.json, the icon and up to 6 screenshots in order' {
+        $names = @('app-1.0.0-win-x64.zip', 'store.json', 'store-icon.png') + (1..8 | ForEach-Object { "store-screenshot-$_.png" })
+        $rel = [pscustomobject]@{ assets = @($names | ForEach-Object { [pscustomobject]@{ id = $_; name = $_ } }) }
+        $a = Select-DevStoreStoreAssets $rel
+        $a.meta.name | Should -Be 'store.json'
+        $a.icon.name | Should -Be 'store-icon.png'
+        @($a.screenshots).Count | Should -Be 6
+        $a.screenshots[0].name | Should -Be 'store-screenshot-1.png'
+    }
+    It 'copes with a release without store files' {
+        $rel = [pscustomobject]@{ assets = @([pscustomobject]@{ id = 1; name = 'x-1.0.0-win-x64.zip' }) }
+        $a = Select-DevStoreStoreAssets $rel
+        $a.meta | Should -BeNullOrEmpty
+        $a.icon | Should -BeNullOrEmpty
+        @($a.screenshots).Count | Should -Be 0
+    }
+}

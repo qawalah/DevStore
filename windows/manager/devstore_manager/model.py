@@ -74,7 +74,13 @@ def _app_states(state: dict) -> dict[str, dict]:
     apps = state.get("apps") if isinstance(state, dict) else None
     if not isinstance(apps, dict):
         return {}
-    return {str(k).lower(): v for k, v in apps.items() if isinstance(v, dict)}
+    states = {}
+    for k, v in apps.items():
+        if isinstance(v, list):  # entries saved as [null, null, {...}] by updater 1.0.0
+            v = next((x for x in reversed(v) if isinstance(x, dict)), None)
+        if isinstance(v, dict):
+            states[str(k).lower()] = v
+    return states
 
 
 def build_rows(config: dict, state: dict, services: dict[str, str], now: Optional[dt.datetime] = None) -> list[AppRow]:

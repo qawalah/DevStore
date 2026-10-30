@@ -100,3 +100,12 @@ def test_footer_text():
 
 def test_service_name():
     assert model.service_name("my-svc") == "devstore-my-svc"
+
+
+def test_build_rows_repairs_list_entries_from_updater_1_0_0():
+    config = {"apps": [{"repo": "qawalah/DevStore"}]}
+    state = {"apps": {"qawalah/DevStore": [None, None, {"name": "devstore-manager", "type": "gui",
+                                                       "installed": "1.0.0", "status": "ok"}]}}
+    rows = model.build_rows(config, state, {})
+    assert rows[0].installed == "1.0.0"
+    assert rows[0].status == "Up to date"

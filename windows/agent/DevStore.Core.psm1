@@ -142,6 +142,36 @@ function Set-DevStoreConfigApp {
     return $Config
 }
 
+function ConvertTo-DevStoreSafeName {
+    # 'Owner/Repo' -> 'owner__repo', for cache folder names.
+    param([string]$Repo)
+    return ($Repo.ToLowerInvariant() -replace '/', '__' -replace '[^a-z0-9._-]', '_')
+}
+
+function ConvertFrom-DevStoreRequest {
+    # Validates a request file written by the Manager. Returns @{action; repo} or $null.
+    param($Request)
+    if ($null -eq $Request -or $Request -isnot [hashtable] -or -not $Request.ContainsKey('action')) { return $null }
+    $action = [string]$Request['action']
+    if ($action -eq 'check') { return @{ action = 'check'; repo = $null } }
+    if ($action -notin @('install', 'remove')) { return $null }
+    $repo = [string]$Request['repo']
+    if (-not (Test-DevStoreRepoName $repo)) { return $null }
+    return @{ action = $action; repo = $repo }
+}
+
+function Select-DevStoreStoreAssets {
+    # Store listing files attached to a release by windows-release.yml.
+    param($Release)
+    $assets = @($Release.assets)
+    $meta = $assets | Where-Object { $_.name -eq 'store.json' } | Select-Object -First 1
+    $icon = $assets | Where-Object { $_.name -eq 'store-icon.png' } | Select-Object -First 1
+    $shots = @($assets | Where-Object { $_.name -match '^store-screenshot-(\d+)\.png$' } |
+        Sort-Object { [int]($_.name -replace '^store-screenshot-(\d+)\.png$', '$1') } | Select-Object -First 6)
+    return @{ meta = $meta; icon = $icon; screenshots = $shots }
+}
+
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
-    New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp
+    New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
+    ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets

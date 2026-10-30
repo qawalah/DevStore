@@ -84,20 +84,20 @@ function Save-DevStoreAsset {
     $client.Timeout = [TimeSpan]::FromMinutes(30)
     try {
         $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, "https://api.github.com/repos/$Repo/releases/assets/$AssetId")
-        $req.Headers.Add('Authorization', "Bearer $Token")
-        $req.Headers.Add('Accept', 'application/octet-stream')
-        $req.Headers.Add('User-Agent', $script:UserAgent)
+        [void]$req.Headers.Add('Authorization', "Bearer $Token")
+        [void]$req.Headers.Add('Accept', 'application/octet-stream')
+        [void]$req.Headers.Add('User-Agent', $script:UserAgent)
         $resp = $client.SendAsync($req).GetAwaiter().GetResult()
         if ([int]$resp.StatusCode -ge 300 -and [int]$resp.StatusCode -lt 400) {
             $location = $resp.Headers.Location
             $resp.Dispose()
             $req2 = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $location)
-            $req2.Headers.Add('User-Agent', $script:UserAgent)
+            [void]$req2.Headers.Add('User-Agent', $script:UserAgent)
             $resp = $client.SendAsync($req2, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         }
         if (-not $resp.IsSuccessStatusCode) { throw "Download of asset $AssetId failed: HTTP $([int]$resp.StatusCode)" }
         $out = [System.IO.File]::Create($OutFile)
-        try { $resp.Content.CopyToAsync($out).GetAwaiter().GetResult() } finally { $out.Dispose() }
+        try { [void]$resp.Content.CopyToAsync($out).GetAwaiter().GetResult() } finally { $out.Dispose() }
         $resp.Dispose()
     }
     finally {
@@ -228,8 +228,19 @@ function Start-DevStoreServiceHealthy {
 
 # ---------------------------------------------------------------- update flow
 
+function Select-DevStoreHashtable {
+    # PowerShell functions return everything a command prints, not just the
+    # 'return' value. Keep only the last hashtable (repairs entries that 1.0.0
+    # saved as [null, null, {...}]).
+    param($Value)
+    $found = $null
+    foreach ($v in @($Value)) { if ($v -is [hashtable]) { $found = $v } }
+    return $found
+}
+
 function Copy-DevStoreAppState {
     param($AppState)
+    $AppState = Select-DevStoreHashtable $AppState
     $s = @{ bad = @() }
     if ($null -ne $AppState) {
         foreach ($k in @($AppState.Keys)) { $s[$k] = $AppState[$k] }
@@ -421,7 +432,8 @@ function Invoke-DevStoreUpdaterRun {
                 $prev = $null
                 if ($oldApps.ContainsKey($repo)) { $prev = $oldApps[$repo] }
                 try {
-                    $s = Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $token
+                    $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $token)
+                    if ($null -eq $s) { throw 'The updater returned no result for this app.' }
                 }
                 catch {
                     $s = Copy-DevStoreAppState $prev
@@ -451,7 +463,7 @@ function Invoke-DevStoreUpdaterRun {
     }
 }
 
-Export-ModuleMember -Function Join-DevStorePath, Write-DevStoreLog, Read-DevStoreToken, Write-DevStoreToken,
+Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Write-DevStoreLog, Read-DevStoreToken, Write-DevStoreToken,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,
