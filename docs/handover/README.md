@@ -39,6 +39,12 @@ Open the Claude chat where the app was built and paste the whole prompt from
 2. **Add file → Upload files** → drop the zip → **Commit changes**.
 
 ### Step 3: add secrets (Android apps only)
+
+> **Does the app already have its own signing key** (like Werd's `werd`
+> or SimDeck's `simdeck`)? Use that key instead of the DevStore key, so the
+> copy on your phone keeps updating and keeps its data. See
+> "Using an app's own key" below.
+
 Repo → **Settings → Secrets and variables → Actions → New repository
 secret**. Add both:
 - `DEVSTORE_KEYSTORE_B64`
@@ -69,3 +75,30 @@ the Release run should be green.
 
 From now on: develop in Claude Code on that repo. Every change that bumps the
 version reaches your devices by itself.
+
+## Using an app's own key
+
+If the app is already on your phone, signed with its own keystore file, keep
+using that key. Otherwise Android refuses the update, and you'd have to
+uninstall the app and lose its data.
+
+In that app's repo, add these secrets (Settings → Secrets and variables →
+Actions → New repository secret):
+
+| Secret | Value |
+|---|---|
+| `DEVSTORE_KEYSTORE_B64` | The app's keystore file as base64 text (see below) |
+| `DEVSTORE_KEYSTORE_PASSWORD` | The keystore password |
+| `DEVSTORE_KEY_ALIAS` | The key's name, for example `werd` or `simdeck` |
+| `DEVSTORE_KEY_PASSWORD` | Only if the key has a different password from the keystore |
+
+**Turning the keystore file into base64 text on Windows.** Open PowerShell
+and run this, with your file's path. The text is copied to your clipboard;
+paste it straight into the secret:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\werd-release.jks")) | Set-Clipboard
+```
+
+Never upload the keystore file to a repo or into a chat. If the alias is
+wrong, the Release run stops and lists the key names it found.

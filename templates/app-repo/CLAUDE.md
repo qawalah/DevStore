@@ -9,7 +9,8 @@ phone through Obtainium.
   every change the user should receive. No bump means no release (the build
   still runs as a check).
 - **Don't add a release `signingConfig`** and don't commit keystores. CI signs
-  every release with the shared DevStore key.
+  every release with the DevStore key, or with the app's own key if its repo
+  has `DEVSTORE_KEY_ALIAS` set.
 - Keep `gradlew`, `gradlew.bat` and `gradle/wrapper/*` committed.
 - When a change is done: commit and push to `main`. That push *is* the
   release. If the environment allows it, run `./gradlew assembleRelease` first.

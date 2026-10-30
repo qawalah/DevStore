@@ -62,6 +62,8 @@ def status_text(app_state: Optional[dict], service_status: Optional[str]) -> str
         err = app_state.get("lastError")
         return f"Error: {err}" if err else "Error"
     if status == "ok":
+        if app_state.get("restartPending"):
+            return f"Updated to v{app_state.get('installed', '?')}, restart the app to use it"
         if app_state.get("type") == "service" and service_status:
             return f"Up to date, {service_status.lower()}"
         return "Up to date"

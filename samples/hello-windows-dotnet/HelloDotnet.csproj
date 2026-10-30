@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Deliberately not "hello-windows-dotnet": the DevStore build renames the exe. -->
+    <AssemblyName>HelloDotnet</AssemblyName>
+  </PropertyGroup>
+</Project>

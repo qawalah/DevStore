@@ -56,15 +56,22 @@ if ($LASTEXITCODE -ne 0) { throw "Setting permissions on $Root failed (icacls ex
 
 # 3. GitHub token (fine-grained, read-only Contents).
 $tokenFile = Join-Path $Root 'token.dat'
-if ($NewToken -or -not (Test-Path -LiteralPath $tokenFile)) {
-    Write-Output ''
-    Write-Output 'Paste a fine-grained GitHub token with read-only "Contents" access to your app repos'
-    Write-Output '(github.com > Settings > Developer settings > Fine-grained tokens). Input is hidden.'
-    $secure = Read-Host -Prompt 'GitHub token' -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try { $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-    if ([string]::IsNullOrWhiteSpace($token)) { throw 'No token entered.' }
-    $token = $token.Trim()
+# DevStoreSetup.exe passes the token in DEVSTORE_TOKEN (never on the command line).
+$envToken = $env:DEVSTORE_TOKEN
+if ($envToken -or $NewToken -or -not (Test-Path -LiteralPath $tokenFile)) {
+    if ($envToken) {
+        $token = $envToken.Trim()
+    }
+    else {
+        Write-Output ''
+        Write-Output 'Paste a fine-grained GitHub token with read-only "Contents" access to your app repos'
+        Write-Output '(github.com > Settings > Developer settings > Fine-grained tokens). Input is hidden.'
+        $secure = Read-Host -Prompt 'GitHub token' -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try { $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        if ([string]::IsNullOrWhiteSpace($token)) { throw 'No token entered.' }
+        $token = $token.Trim()
+    }
     Write-Output "Checking the token against $ManagerRepo..."
     Get-DevStoreReleases -Repo $ManagerRepo -Token $token | Out-Null
     Write-DevStoreToken -Root $Root -Token $token

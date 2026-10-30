@@ -1,5 +1,5 @@
-# Reusable workflow: build a Python app with PyInstaller (onedir) and publish
-# it as a GitHub Release for the DevStore Windows updater.
+# Reusable workflow: build a Windows app (Python via PyInstaller, Go, or C#/.NET) and
+# publish it as a GitHub Release for the DevStore Windows updater.
 # App repos call it from templates/windows-app-repo/.github/workflows/release.yml.
 name: DevStore Windows release
 
@@ -13,6 +13,9 @@ on:
       python-version:
         type: string
         default: "3.12"
+      dotnet-version:
+        type: string
+        default: "8.0.x"
       publish:
         description: Create the tag and GitHub Release (false = build check only)
         type: boolean
@@ -30,39 +33,115 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ inputs.python-version }}
-
       - name: Read devstore.json
         run: |
           if (-not (Test-Path devstore.json)) { Write-Output "::error::devstore.json not found in ${{ inputs.working-directory }}"; exit 1 }
           $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          $lang = 'python'
+          if ($m.PSObject.Properties['language'] -and $m.language) { $lang = $m.language }
           $errors = @()
           if ($m.name -notmatch '^[a-z0-9-]+$') { $errors += "name must match ^[a-z0-9-]+$ (got '$($m.name)')" }
           if ($m.type -notin @('gui', 'service')) { $errors += "type must be 'gui' or 'service' (got '$($m.type)')" }
           if ($m.version -notmatch '^\d+\.\d+\.\d+$') { $errors += "version must look like 1.2.3 (got '$($m.version)')" }
-          if (-not $m.entry -or -not (Test-Path $m.entry)) { $errors += "entry file not found: '$($m.entry)'" }
+          if ($lang -notin @('python', 'go', 'dotnet')) { $errors += "language must be 'python', 'go' or 'dotnet' (got '$lang')" }
+          if ($lang -eq 'python' -and (-not $m.entry -or -not (Test-Path $m.entry))) { $errors += "entry file not found: '$($m.entry)'" }
+          if ($lang -eq 'go' -and -not (Test-Path go.mod)) { $errors += "go.mod not found next to devstore.json (language is 'go')" }
+          if ($lang -eq 'dotnet' -and (-not $m.entry -or $m.entry -notmatch '\.csproj$' -or -not (Test-Path $m.entry))) { $errors += "entry must be the app's .csproj file (got '$($m.entry)')" }
+          # Optional extras: "include" = files/folders copied next to the exe;
+          # "prepare" = a .ps1 run after the build (e.g. to download an engine into $env:DEVSTORE_OUT).
+          if ($m.PSObject.Properties['include']) {
+            foreach ($i in @($m.include)) {
+              if ([IO.Path]::IsPathRooted($i) -or $i -match '\.\.') { $errors += "include paths must stay inside the folder (got '$i')" }
+              elseif (-not (Test-Path $i)) { $errors += "include path not found: '$i'" }
+            }
+          }
+          if ($m.PSObject.Properties['prepare'] -and $m.prepare -and -not (Test-Path $m.prepare)) { $errors += "prepare script not found: '$($m.prepare)'" }
           if ($errors) { $errors | ForEach-Object { Write-Output "::error::devstore.json: $_" }; exit 1 }
+          $entry = $m.entry
+          if ($lang -eq 'go' -and -not $entry) { $entry = '.' }   # Go: the package to build, e.g. ./cmd/server
           "APP_NAME=$($m.name)" >> $env:GITHUB_ENV
           "APP_TYPE=$($m.type)" >> $env:GITHUB_ENV
           "APP_VERSION=$($m.version)" >> $env:GITHUB_ENV
-          "APP_ENTRY=$($m.entry)" >> $env:GITHUB_ENV
+          "APP_ENTRY=$entry" >> $env:GITHUB_ENV
+          "APP_LANG=$lang" >> $env:GITHUB_ENV
 
-      - name: Install dependencies
+      - uses: actions/setup-python@v6
+        if: env.APP_LANG == 'python'
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - uses: actions/setup-go@v6
+        if: env.APP_LANG == 'go'
+        with:
+          go-version-file: ${{ inputs.working-directory }}/go.mod
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      - name: Build (Python, PyInstaller)
+        if: env.APP_LANG == 'python'
         run: |
           python -m pip install --upgrade pip
           if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
           python -m pip install "pyinstaller>=6,<7"
-
-      - name: Build with PyInstaller
-        run: |
           $pyiArgs = @('--noconfirm', '--clean', '--onedir', '--name', $env:APP_NAME)
           if ($env:APP_TYPE -eq 'gui') { $pyiArgs += '--noconsole' }
           if (Test-Path icon.ico) { $pyiArgs += @('--icon', 'icon.ico') }
           python -m PyInstaller @pyiArgs $env:APP_ENTRY
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/setup-dotnet@v5
+        if: env.APP_LANG == 'dotnet'
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Build (C#/.NET)
+        if: env.APP_LANG == 'dotnet'
+        run: |
+          $out = Join-Path 'dist' $env:APP_NAME
+          dotnet publish $env:APP_ENTRY -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:Version=$env:APP_VERSION -p:DebugType=none -o $out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The updater runs <name>.exe, so rename the published exe if its assembly name differs.
+          $asm = (dotnet msbuild $env:APP_ENTRY -getProperty:AssemblyName).Trim()
+          if (-not $asm) { $asm = [IO.Path]::GetFileNameWithoutExtension($env:APP_ENTRY) }
+          $built = Join-Path $out "$asm.exe"
+          $want = Join-Path $out "$($env:APP_NAME).exe"
+          if (-not (Test-Path $built)) { Write-Output "::error::Expected $built after dotnet publish"; exit 1 }
+          if ($asm -ne $env:APP_NAME) { Move-Item $built $want -Force }
+
+      - name: Build (Go)
+        if: env.APP_LANG == 'go'
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $out = Join-Path (Join-Path 'dist' $env:APP_NAME) "$($env:APP_NAME).exe"
+          $ld = "-s -w -X main.version=$($env:APP_VERSION)"
+          if ($env:APP_TYPE -eq 'gui') { $ld += ' -H=windowsgui' }
+          go build -trimpath -ldflags $ld -o $out $env:APP_ENTRY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare (optional script from devstore.json)
+        run: |
+          $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          if ($m.PSObject.Properties['prepare'] -and $m.prepare) {
+            $env:DEVSTORE_OUT = (Resolve-Path (Join-Path 'dist' $env:APP_NAME)).Path
+            Write-Output "Running $($m.prepare) (output folder: $env:DEVSTORE_OUT)"
+            & (Resolve-Path $m.prepare).Path
+            if (-not $?) { exit 1 }
+          }
+
+      - name: Smoke-check build
+        run: |
+          $exe = Join-Path "dist/$($env:APP_NAME)" "$($env:APP_NAME).exe"
+          if (-not (Test-Path $exe)) { Write-Output "::error::$exe was not produced"; exit 1 }
+
+      - name: Package
+        run: |
           $dist = Join-Path 'dist' $env:APP_NAME
+          $m = Get-Content devstore.json -Raw | ConvertFrom-Json
+          if ($m.PSObject.Properties['include']) {
+            foreach ($i in @($m.include)) { Copy-Item -Path $i -Destination $dist -Recurse -Force }
+          }
           Copy-Item devstore.json $dist
           $zipName = "$($env:APP_NAME)-$($env:APP_VERSION)-win-x64.zip"
           $zip = Join-Path $env:RUNNER_TEMP $zipName
@@ -71,11 +150,6 @@ jobs:
           Set-Content -Path "$zip.sha256" -Value "$hash  $zipName" -NoNewline -Encoding ascii
           "ZIP=$zip" >> $env:GITHUB_ENV
           Write-Output "Built $zipName ($hash)"
-
-      - name: Smoke-check build
-        run: |
-          $exe = Join-Path "dist/$($env:APP_NAME)" "$($env:APP_NAME).exe"
-          if (-not (Test-Path $exe)) { Write-Output "::error::$exe was not produced"; exit 1 }
 
       - name: Publish GitHub Release
         if: inputs.publish

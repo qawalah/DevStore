@@ -15,3 +15,6 @@ local.properties
 *.apk
 
 .claude/settings.local.json
+
+# DevStoreSetup.exe build payload
+windows/setup/payload/

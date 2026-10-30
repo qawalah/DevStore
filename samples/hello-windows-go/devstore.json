@@ -1,0 +1,9 @@
+{
+  "name": "hello-windows-go",
+  "type": "service",
+  "language": "go",
+  "entry": ".",
+  "version": "1.0.0",
+  "include": ["README.txt"],
+  "prepare": "tools/prepare.ps1"
+}

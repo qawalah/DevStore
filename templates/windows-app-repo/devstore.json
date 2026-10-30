@@ -1,6 +1,7 @@
 {
   "name": "my-app",
   "type": "gui",
+  "language": "python",
   "entry": "src/main.py",
   "version": "1.0.0"
 }

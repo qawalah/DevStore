@@ -9,21 +9,29 @@ Create a fine-grained token with **Contents → Read-only** on your `qawalah`
 repos (see [phone-setup.md](phone-setup.md) step 2; the same token works).
 
 ## 2. Install the updater
-1. Download this repo: GitHub → `qawalah/devstore` → **Code → Download ZIP**,
-   then unzip it anywhere.
-2. Open **PowerShell as administrator** (Start → type "PowerShell" →
-   right-click → Run as administrator).
-3. Run:
-   ```powershell
-   cd "$HOME\Downloads\devstore-main"      # wherever you unzipped it
-   powershell -ExecutionPolicy Bypass -File .\windows\agent\Install-DevStoreAgent.ps1
-   ```
-4. Paste the token when asked. Input is hidden.
 
-The installer does the following:
+**Easy way: DevStoreSetup.exe**
+1. On GitHub, open `qawalah/DevStore` → **Releases** and find the newest
+   **DevStore Setup** release (tag `setup-v…`). Download `DevStoreSetup.exe`.
+2. Double-click it. If Windows shows "Windows protected your PC", click
+   **More info → Run anyway**. The installer isn't code-signed, which is why
+   this appears.
+3. Click **Yes** on the admin prompt.
+4. Paste your GitHub token and click **Install**. It takes about a minute.
+
+Run the same file again later to update DevStore or replace the token. Leave
+the token empty to keep the current one.
+
+**Manual way (PowerShell)**: if you prefer, from a downloaded copy of this
+repo, in **PowerShell as administrator**:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\agent\Install-DevStoreAgent.ps1
+```
+
+Either way, the installer:
 - creates `C:\DevStore`,
 - stores the token encrypted for this PC,
-- downloads WinSW (the tool that runs your Python services as real Windows
+- downloads WinSW (the tool that runs your background apps as real Windows
   services),
 - registers the **DevStore Updater** task (runs at startup and every 10
   minutes),
@@ -31,11 +39,6 @@ The installer does the following:
 
 Within a few minutes, **DevStore Manager** appears in the Start menu under
 *DevStore*.
-
-> The DevStore Manager is released from this repo's `main` branch. Until the
-> `windows/manager` code is on `main` and its first release exists, the
-> Manager shows "No windows-v release found yet." The updater keeps working,
-> and you can use the commands below.
 
 ## 3. Add your apps
 In **DevStore Manager**, type `qawalah/<app>` next to "Add app" and press
@@ -56,10 +59,10 @@ C:\DevStore\agent\Remove-DevStoreApp.ps1 -Repo qawalah/my-app   # data is kept
 - Updater log: `C:\DevStore\logs\updater-YYYY-MM.log`. Service output: `C:\DevStore\logs\<name>\`.
 
 ## Maintenance
-- **Token expired** (Manager shows HTTP 401): re-run the installer with
-  `-NewToken`.
-- **Upgrade the updater itself**: download the repo again and re-run the
-  installer. Apps, state and token are kept.
+- **Token expired** (Manager shows HTTP 401): run `DevStoreSetup.exe` again
+  and paste a new token.
+- **Upgrade the updater itself**: download the newest `DevStoreSetup.exe`
+  and run it. Apps, state and token are kept.
 - **Uninstall everything**: remove each app in the Manager, then
   `Unregister-ScheduledTask -TaskName 'DevStore Updater'` and delete
   `C:\DevStore`.

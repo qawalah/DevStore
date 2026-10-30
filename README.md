@@ -36,6 +36,8 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 | `scripts/create-signing-key.sh` | Creates the one shared Android signing key |
 | `windows/agent/` | DevStore Updater (PowerShell) + Pester tests |
 | `windows/manager/` | DevStore Manager (Python/tkinter) + pytest tests |
+| `windows/setup/` | `DevStoreSetup.exe` installer (released by `setup-release.yml`) |
+| `templates/app-repo-both/` | Release workflow for a repo with both an Android app and a Windows part |
 | `samples/` | Tiny apps used to test the pipelines end to end |
 | `docs/superpowers/` | Design spec and implementation plan |
 

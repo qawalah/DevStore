@@ -1,0 +1,63 @@
+# Builds DevStoreSetup.exe (a one-window installer for the DevStore Updater)
+# and publishes it as a GitHub Release tagged setup-v<version>, using
+# windows/setup/version.txt. The Windows updater ignores setup-v releases.
+# Self-test calls this with publish: false.
+name: Setup installer release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - windows/agent/**
+      - windows/setup/**
+      - .github/workflows/setup-release.yml
+  workflow_dispatch:
+  workflow_call:   # Self-test: build only
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows/setup
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build DevStoreSetup.exe
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller>=6,<7"
+          # Bundle the agent scripts (not their tests) as the installer's payload.
+          New-Item -ItemType Directory -Path payload -Force | Out-Null
+          Get-ChildItem ../agent -File | Where-Object { $_.Extension -in '.ps1', '.psm1' } | Copy-Item -Destination payload
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --uac-admin --name DevStoreSetup `
+            --add-data "payload;agent" --add-data "version.txt;." setup.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path dist/DevStoreSetup.exe)) { Write-Output "::error::DevStoreSetup.exe was not produced"; exit 1 }
+          "SETUP_VERSION=$((Get-Content version.txt -Raw).Trim())" >> $env:GITHUB_ENV
+      - name: Publish GitHub Release
+        # Publish only when this file is the top-level workflow (not when Self-test calls it).
+        if: contains(github.workflow_ref, '/setup-release.yml@')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $tag = "setup-v$($env:SETUP_VERSION)"
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "::notice::$tag already released. Bump windows/setup/version.txt to publish a new installer."
+            exit 0
+          }
+          gh release create $tag dist/DevStoreSetup.exe --target $env:GITHUB_SHA --latest=false `
+            --title "DevStore Setup $($env:SETUP_VERSION)" `
+            --notes "Download DevStoreSetup.exe and double-click it. Windows asks for admin permission, then paste your GitHub token. If Windows shows 'Windows protected your PC', click More info, then Run anyway."
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "::notice::Published $tag"

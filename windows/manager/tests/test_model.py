@@ -42,6 +42,8 @@ def test_build_rows_with_garbage_config():
 
 def test_status_text_mapping():
     assert model.status_text({"status": "ok", "type": "gui"}, None) == "Up to date"
+    assert model.status_text({"status": "ok", "type": "gui", "installed": "1.2.0", "restartPending": True}, None) \
+        == "Updated to v1.2.0, restart the app to use it"
     assert model.status_text({"status": "ok", "type": "service"}, "Running") == "Up to date, running"
     assert model.status_text({"status": "ok", "type": "service"}, "Stopped") == "Up to date, stopped"
     assert model.status_text({"status": "pending", "latest": "1.2.0"}, None) == "v1.2.0 waiting for app to close"
