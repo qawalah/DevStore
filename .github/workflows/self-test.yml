@@ -1,6 +1,7 @@
 # Checks DevStore's own pieces on every push: updater tests (Windows
 # PowerShell 5.1 and PowerShell 7), Manager tests, and build-only runs of
-# both release pipelines against the sample apps. Nothing is published.
+# the Android, Windows and Docker release pipelines against the sample apps.
+# Nothing is published.
 name: Self-test
 
 on:
@@ -76,6 +77,22 @@ jobs:
     with:
       working-directory: ${{ matrix.dir }}
       publish: false
+
+  docker-build:
+    name: Docker pipeline (build and smoke test only)
+    uses: ./.github/workflows/docker-release.yml
+    with:
+      working-directory: samples/hello-docker
+      publish: false
+
+  docker-checks:
+    # The workflow's own smoke-test and cleanup-plan scripts, against images
+    # that must be refused and a list of ghcr.io versions.
+    name: Docker pipeline steps (refusals, cleanup plan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash scripts/test-docker-steps.sh all
 
   e2e-windows:
     # Real end-to-end run on a clean Windows machine, like a user's PC:

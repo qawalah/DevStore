@@ -51,10 +51,63 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Read devstore.json
+        env:
+          INPUT_IMAGE: ${{ inputs.image }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          if [ ! -f devstore.json ]; then echo "::error::devstore.json not found in ${{ inputs.working-directory }}"; exit 1; fi
+          name=$(jq -r '.name // ""' devstore.json)
+          version=$(jq -r '.version // ""' devstore.json)
+          errors=()
+          [[ $name =~ ^[a-z0-9-]+$ ]] || errors+=("devstore.json: name must match ^[a-z0-9-]+\$ (got '$name')")
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || errors+=("devstore.json: version must look like 1.2.3 (got '$version')")
+          [ -f "$DOCKERFILE" ] || errors+=("Dockerfile not found: ${{ inputs.working-directory }}/$DOCKERFILE")
+          if [ ${#errors[@]} -gt 0 ]; then printf '::error::%s\n' "${errors[@]}"; exit 1; fi
+          # ghcr.io only accepts lower-case names.
+          image=${INPUT_IMAGE:-$name}
+          image=${image,,}
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          {
+            echo "APP_NAME=$name"
+            echo "APP_VERSION=$version"
+            echo "OWNER=$owner"
+            echo "IMAGE_NAME=$image"
+            echo "IMAGE_REF=ghcr.io/$owner/$image"
+            echo "TAG=docker-v$version"
+          } >> "$GITHUB_ENV"
+
+      - name: Release needed?
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = true ] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "::notice::$TAG already released. Bump version in devstore.json to publish a new image."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP=false" >> "$GITHUB_ENV"
+          fi
+
+      # One platform and no attestations, so each release is a single image manifest:
+      # one package version on ghcr.io, which is what the cleanup below counts.
+      - name: Build
+        if: env.SKIP == 'false'
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+        run: |
+          docker build --platform linux/amd64 --provenance=false --sbom=false \
+            --build-arg VERSION="$APP_VERSION" \
+            --label org.opencontainers.image.version="$APP_VERSION" \
+            --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            -f "$DOCKERFILE" -t "$IMAGE_REF:$APP_VERSION" "$CONTEXT"
+
       # Start the image and wait for its own HEALTHCHECK to pass (probed every 2 s).
       # Uses only environment variables, so scripts/test-docker-steps.sh can run it as is.
       - name: Smoke test (must turn healthy)
         id: smoke-test
+        if: env.SKIP == 'false'
         env:
           IMAGE: ${{ env.IMAGE_REF }}:${{ env.APP_VERSION }}
           HEALTH_TIMEOUT: ${{ inputs.health-timeout }}
@@ -86,6 +139,57 @@ jobs:
           echo "::error::$IMAGE was not healthy within ${HEALTH_TIMEOUT}s."
           exit 1
 
+      # Watchtower on the NAS follows :latest, so it only moves once the version is pushed and checked.
+      - name: Push to ghcr.io
+        if: inputs.publish && env.SKIP == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE_REF:$APP_VERSION"
+          type=$(docker buildx imagetools inspect --raw "$IMAGE_REF:$APP_VERSION" | jq -r .mediaType)
+          case "$type" in
+            application/vnd.oci.image.manifest.v1+json | application/vnd.docker.distribution.manifest.v2+json) ;;
+            *)
+              echo "::error::$IMAGE_REF:$APP_VERSION was pushed as $type, not a single image manifest, so cleanup could break it. latest was not moved."
+              exit 1 ;;
+          esac
+          docker tag "$IMAGE_REF:$APP_VERSION" "$IMAGE_REF:latest"
+          docker push "$IMAGE_REF:latest"
+          echo "::notice::Pushed $IMAGE_REF:$APP_VERSION and :latest"
+
+      # An empty Release, so the version can be listed like the app's other releases.
+      - name: Tag and GitHub Release
+        if: inputs.publish && env.SKIP == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
+            --title "Docker $APP_NAME $APP_VERSION" \
+            --notes "Image \`$IMAGE_REF:$APP_VERSION\` (also \`latest\`). Built from ${GITHUB_SHA::7} by DevStore."
+          echo "::notice::Published $TAG"
+
+      # Runs on every push, not only releases, so a cleanup that failed once is retried.
+      - name: List versions on ghcr.io
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN || github.token }}
+        run: |
+          if [ "$(gh api "users/$OWNER" --jq .type)" = Organization ]; then base="orgs/$OWNER"; else base="users/$OWNER"; fi
+          api="$base/packages/container/$IMAGE_NAME"
+          echo "PACKAGE_API=$api" >> "$GITHUB_ENV"
+          if gh api --paginate "$api/versions?per_page=100" > "$RUNNER_TEMP/pages.json" 2> "$RUNNER_TEMP/list-error.txt"; then
+            jq -s 'add // []' "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/versions.json"
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/list-error.txt"; then
+            echo "No $IMAGE_NAME package on ghcr.io yet: nothing to clean up."
+            echo '[]' > "$RUNNER_TEMP/versions.json"
+          else
+            cat "$RUNNER_TEMP/list-error.txt"
+            echo "::error::Couldn't list the versions of $IMAGE_NAME on ghcr.io. If the workflow token isn't allowed to, add a repo secret GHCR_CLEANUP_TOKEN: a classic token with read:packages and delete:packages."
+            exit 1
+          fi
+
       # Uses only environment variables, so scripts/test-docker-steps.sh can run it as is.
       - name: Plan cleanup
         id: plan-cleanup
@@ -110,3 +214,19 @@ jobs:
             ($del | split("\n") | map(select(length > 0) | tonumber)) as $d
             | .[] | "  \(if (.id | IN($d[])) then "delete" else "keep  " end) \(.id) \(.metadata.container.tags | join(", ") | if . == "" then "(untagged)" else . end)"
           ' "$VERSIONS_FILE"
+
+      - name: Delete old versions
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN || github.token }}
+          DELETE_FILE: ${{ runner.temp }}/delete.txt
+        run: |
+          if [ ! -s "$DELETE_FILE" ]; then echo "Nothing to delete."; exit 0; fi
+          failed=0
+          while read -r id; do
+            if gh api -X DELETE "$PACKAGE_API/versions/$id" --silent; then echo "Deleted version $id"; else failed=1; fi
+          done < "$DELETE_FILE"
+          if [ "$failed" = 1 ]; then
+            echo "::error::GitHub refused to delete old versions of $IMAGE_NAME (the release itself is published). Add a repo secret GHCR_CLEANUP_TOKEN: a classic token with read:packages and delete:packages. The next push tries again."
+            exit 1
+          fi
