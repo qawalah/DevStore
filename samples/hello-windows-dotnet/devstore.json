@@ -1,0 +1,7 @@
+{
+  "name": "hello-windows-dotnet",
+  "type": "service",
+  "language": "dotnet",
+  "entry": "HelloDotnet.csproj",
+  "version": "1.0.0"
+}

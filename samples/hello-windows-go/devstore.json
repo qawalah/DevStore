@@ -3,5 +3,7 @@
   "type": "service",
   "language": "go",
   "entry": ".",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "include": ["README.txt"],
+  "prepare": "tools/prepare.ps1"
 }
