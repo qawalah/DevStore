@@ -11,28 +11,28 @@
     <aside class="sidebar">
       <div class="brand">
         <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7"/><path d="M11 12.5h10l-1 9.5h-8z"/><path d="M13.5 12.5a2.5 2.5 0 0 1 5 0"/></svg>
-        <span>DevStore</span>
+        <span class="brand-name">DevStore</span>
       </div>
       <nav class="nav" aria-label="Sections">
-        <button class="nav-item" data-view="discover" aria-current="page">
+        <button class="nav-item" data-view="discover" aria-current="page" title="Discover">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
-          <span>Discover</span>
+          <span class="label">Discover</span>
         </button>
-        <button class="nav-item" data-view="installed">
+        <button class="nav-item" data-view="installed" title="Installed">
           <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
-          <span>Installed</span><span class="count" id="count-installed"></span>
+          <span class="label">Installed</span><span class="count" id="count-installed"></span>
         </button>
-        <button class="nav-item" data-view="activity">
+        <button class="nav-item" data-view="activity" title="Activity">
           <svg viewBox="0 0 24 24"><path d="M4 12h4l2.5-6 3 12 2.5-6h4"/></svg>
-          <span>Activity</span>
+          <span class="label">Activity</span>
         </button>
       </nav>
       <div class="updater" id="updater">
         <div class="updater-line"><span class="dot" id="updater-dot"></span><span id="updater-title">Checking…</span></div>
         <p class="updater-sub" id="updater-sub"></p>
-        <button class="btn btn-quiet btn-block" id="check-now">
+        <button class="btn btn-quiet btn-block" id="check-now" title="Check for updates">
           <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
-          <span>Check for updates</span>
+          <span class="label">Check for updates</span>
         </button>
       </div>
     </aside>

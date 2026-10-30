@@ -121,6 +121,7 @@ function renderUpdater(u) {
   $("#updater-dot").className = `dot ${u.kind}`;
   $("#updater-title").textContent = u.title;
   $("#updater-sub").textContent = u.sub;
+  $("#updater").title = `${u.title}. ${u.sub}`;
 }
 
 function renderBanner() {
@@ -140,11 +141,19 @@ function renderDiscover(v) {
   const apps = view.apps.filter((a) => !a.isSelf && matches(a));
   if (!view.apps.some((a) => !a.isSelf)) {
     v.innerHTML = emptyHtml("No Windows apps found yet",
-      "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within 10 minutes.");
+      "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within 10 minutes.") + addHtml();
     return;
   }
-  if (!apps.length) { v.innerHTML = emptyHtml("No matches", `Nothing matches “${esc(search)}”.`); return; }
-  v.innerHTML = `<div class="grid">${apps.map(cardHtml).join("")}</div>`;
+  if (!apps.length) { v.innerHTML = emptyHtml("No matches", `Nothing matches “${esc(search)}”.`) + addHtml(); return; }
+  v.innerHTML = `<div class="grid">${apps.map(cardHtml).join("")}</div>` + addHtml();
+}
+
+function addHtml() {
+  return `<form class="add" id="add-form">
+    <div class="add-text"><strong>Missing an app?</strong> Apps appear here by themselves within 10 minutes of their first Windows release. You can also add one by its GitHub name.</div>
+    <div class="add-row"><input id="add-repo" placeholder="owner/repo, e.g. qawalah/werd" autocomplete="off" spellcheck="false" aria-label="GitHub repo">
+    <button class="btn btn-quiet" type="submit">${ICONS.download}<span>Add</span></button></div>
+  </form>`;
 }
 
 function cardHtml(a) {
@@ -265,6 +274,17 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && route.name === "app") go(route.from || "discover");
   if (e.key === "Enter" && e.target.matches("[data-goto]")) go("app", e.target.dataset.goto);
+});
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "add-form") return;
+  e.preventDefault();
+  const input = $("#add-repo");
+  const repo = input.value.trim();
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) { toast("Type the repo as owner/name, for example qawalah/werd.", false); input.focus(); return; }
+  const res = await api().install(repo);
+  toast(res.ok ? `Added ${repo}. It installs once it has a Windows release.` : res.message, res.ok);
+  if (res.ok) input.value = "";
+  load();
 });
 $("#search").addEventListener("input", (e) => { search = e.target.value.trim(); render(); });
 $("#check-now").addEventListener("click", async (e) => {
