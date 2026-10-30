@@ -146,6 +146,97 @@ def service_action(name: str, action: str) -> None:
     run_elevated("Invoke-DevStoreServiceAction.ps1", Name=name, Action=action)
 
 
+def _process_list() -> list[tuple[int, str]]:
+    """(pid, full exe path) for every process this user can see. Windows only."""
+    if sys.platform != "win32":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+    k = ctypes.windll.kernel32
+    k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k.OpenProcess.restype = wintypes.HANDLE
+    snap = k.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return []
+    out = []
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        ok = k.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            pid = entry.th32ProcessID
+            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if h:
+                buf = ctypes.create_unicode_buffer(32768)
+                size = wintypes.DWORD(len(buf))
+                if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    out.append((pid, buf.value))
+                k.CloseHandle(h)
+            ok = k.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        k.CloseHandle(snap)
+    return out
+
+
+def _app_of(path: str) -> str | None:
+    """The installed app's name if `path` is inside ROOT/apps/<name>/, else None."""
+    if not path:
+        return None
+    prefix = str(ROOT / "apps").replace("\\", "/").rstrip("/").lower() + "/"
+    p = path.replace("\\", "/").lower()
+    if not p.startswith(prefix):
+        return None
+    return p[len(prefix):].split("/", 1)[0] or None
+
+
+def apps_from_processes(procs: list[tuple[int, str]]) -> set[str]:
+    return {n for n in (_app_of(path) for _, path in procs) if n}
+
+
+def pids_for_app(procs: list[tuple[int, str]], name: str) -> list[int]:
+    return [pid for pid, path in procs if _app_of(path) == name.lower()]
+
+
+def running_apps() -> set[str]:
+    """Names of installed apps with a process running right now."""
+    return apps_from_processes(_process_list())
+
+
+def close_app(name: str) -> int:
+    """Force-closes every process running from the app's folder (never this window). Returns how many."""
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.windll.kernel32
+    k.OpenProcess.restype = wintypes.HANDLE
+    closed = 0
+    for pid in pids_for_app(_process_list(), name):
+        if pid == os.getpid():
+            continue
+        h = k.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+        if h:
+            if k.TerminateProcess(h, 1):
+                closed += 1
+            k.CloseHandle(h)
+    return closed
+
+
+def relaunch_app(name: str, exe: str) -> None:
+    """Force close, wait up to 5 s for it to exit, then open the current version."""
+    close_app(name)
+    for _ in range(50):
+        if name.lower() not in running_apps():
+            break
+        time.sleep(0.1)
+    launch(app_exe(name, exe))
+
+
 def app_exe(name: str, exe: str) -> Path:
     return ROOT / "apps" / name / "current" / exe
 

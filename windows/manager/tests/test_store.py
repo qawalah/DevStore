@@ -145,3 +145,29 @@ def test_activity_entries():
     assert entries[0] == {"time": "2026-10-30 11:55:00", "app": "", "text": "agent installed/upgraded"}
     assert entries[1]["app"] == "svc"
     assert len(entries) == 2
+
+
+def test_running_window_app_offers_restart_and_force_close():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.0.0", "status": "ok"}}}
+    cfg = {"apps": [{"repo": "qawalah/t"}]}
+    a = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"t"}), "qawalah/t")
+    assert a["running"] is True
+    assert a["status"]["text"] == "Running · up to date"
+    assert a["actions"] == ["relaunch", "close", "data", "remove"]
+    a = app(store.build_view(cfg, st, {}, {}, {}, NOW, running=set()), "qawalah/t")
+    assert a["running"] is False and a["actions"][0] == "open"
+
+
+def test_restart_to_update_makes_restart_the_first_button():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.1.0", "status": "ok", "restartPending": True}}}
+    a = app(store.build_view({"apps": [{"repo": "qawalah/t"}]}, st, {}, {}, {}, NOW, running={"t"}), "qawalah/t")
+    assert a["status"]["text"] == "Updated to 1.1.0: restart the app to use it"
+    assert a["actions"][0] == "relaunch"
+
+
+def test_manager_can_restart_itself_after_an_update():
+    st = {"apps": {"qawalah/DevStore": {"name": "devstore-manager", "type": "gui", "installed": "2.0.1",
+                                        "status": "ok", "restartPending": True}}}
+    a = app(store.build_view({"apps": [{"repo": "qawalah/DevStore"}]}, st, {}, {}, {}, NOW,
+                             running={"devstore-manager"}), "qawalah/DevStore")
+    assert a["actions"] == ["relaunch", "data"]

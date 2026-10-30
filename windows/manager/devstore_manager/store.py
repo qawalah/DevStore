@@ -73,7 +73,8 @@ def explain(error: str) -> str:
     return e
 
 
-def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str]) -> dict:
+def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str],
+            running: bool = False) -> dict:
     def st(kind: str, text: str, detail: str = "", short: str = "") -> dict:
         return {"kind": kind, "text": text, "detail": detail, "short": short or text}
 
@@ -109,10 +110,13 @@ def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service:
             return st("warn", "Stopped")
         if service in ("Starting", "Stopping"):
             return st("busy", f"{service}…")
+    if running:
+        return st("ok", "Running · up to date")
     return st("ok", "Installed · up to date")
 
 
-def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str], is_self: bool) -> list[str]:
+def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str], is_self: bool,
+             running: bool = False) -> list[str]:
     if pending:
         return []
     if not in_config:
@@ -127,7 +131,12 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
             acts.append("start")
         else:
             acts.append("restart")
-    elif not is_self:
+    elif is_self:
+        if s.get("restartPending"):
+            acts.append("relaunch")   # DevStore restarting itself to use its update
+    elif running:
+        acts += ["relaunch", "close"]  # relaunch = force close, then open again
+    else:
         acts.append("open")
     acts.append("data")
     if not is_self:
@@ -136,9 +145,10 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
 
 
 def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str],
-               pending: dict[str, str], now: dt.datetime) -> dict:
+               pending: dict[str, str], now: dt.datetime, running: Optional[set] = None) -> dict:
     """Everything the window renders. `pending` maps repo -> 'install'/'remove' for
-    requests the updater hasn't picked up yet; `services` maps devstore-<name> -> status."""
+    requests the updater hasn't picked up yet; `services` maps devstore-<name> -> status;
+    `running` holds the names of window apps that are open right now."""
     state = state if isinstance(state, dict) else {}
     states = _by_repo(state.get("apps"))
     cat = _by_repo((catalog or {}).get("apps") if isinstance(catalog, dict) else None)
@@ -156,7 +166,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         app_type = (s or {}).get("type") or c.get("type") or ""
         service = services.get(f"devstore-{name}") if app_type == "service" else None
         is_self = name == SELF_NAME
-        status = _status(s, in_config, pend.get(key), service)
+        is_running = app_type != "service" and name in (running or set())
+        status = _status(s, in_config, pend.get(key), service, is_running)
         apps.append({
             "repo": repo,
             "name": name,
@@ -167,7 +178,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "installedVersion": (s or {}).get("installed") or "",
             "latest": c.get("latest") or (s or {}).get("latest") or "",
             "status": status,
-            "actions": _actions(s, in_config, pend.get(key), service, is_self),
+            "actions": _actions(s, in_config, pend.get(key), service, is_self, is_running),
+            "running": is_running,
             "icon": c.get("icon"),
             "screenshots": c.get("screenshots") or [],
             "isSelf": is_self,
