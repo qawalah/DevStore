@@ -48,7 +48,7 @@ foreach ($d in '', 'agent', 'tools', 'apps', 'logs', 'downloads') {
     $p = Join-Path $Root $d
     if (-not (Test-Path -LiteralPath $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
 }
-Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Extension -in '.ps1', '.psm1' } |
+Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Extension -in '.ps1', '.psm1' -or $_.Name -eq 'VERSION' } |
     Copy-Item -Destination (Join-Path $Root 'agent') -Force
 
 # 2. Permissions: SYSTEM + Administrators full; Users read/execute (to run

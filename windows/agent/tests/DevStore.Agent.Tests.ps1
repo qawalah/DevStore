@@ -455,22 +455,46 @@ Describe 'Update-DevStoreAgentFiles' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         $script:Bundled = Join-Path $script:Root 'apps/devstore-manager/current/agent'
-        New-Item -ItemType Directory -Path $script:Bundled, (Join-Path $script:Root 'agent') -Force | Out-Null
-        Set-Content (Join-Path $script:Root 'agent/DevStore.Agent.psm1') 'old'
+        $script:Installed = Join-Path $script:Root 'agent'
+        New-Item -ItemType Directory -Path $script:Bundled, $script:Installed -Force | Out-Null
+        Set-Content (Join-Path $script:Installed 'DevStore.Agent.psm1') 'old'
+        Set-Content (Join-Path $script:Installed 'VERSION') '2.1.0'
     }
 
     It 'copies newer updater scripts shipped with the Manager' {
         Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'new'
         Set-Content (Join-Path $Bundled 'DevStoreUpdater.ps1') 'new runner'
+        Set-Content (Join-Path $Bundled 'VERSION') '2.2.0'
 
         Update-DevStoreAgentFiles -Root $Root | Should -BeTrue
 
-        Get-Content (Join-Path $Root 'agent/DevStore.Agent.psm1') | Should -Be 'new'
-        Test-Path (Join-Path $Root 'agent/DevStoreUpdater.ps1') | Should -BeTrue
+        Get-Content (Join-Path $Installed 'DevStore.Agent.psm1') | Should -Be 'new'
+        Test-Path (Join-Path $Installed 'DevStoreUpdater.ps1') | Should -BeTrue
+        Get-Content (Join-Path $Installed 'VERSION') | Should -Be '2.2.0'
     }
 
-    It 'leaves identical scripts alone' {
-        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'old'
+    It 'never goes back to older scripts' {
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'older'
+        Set-Content (Join-Path $Bundled 'VERSION') '2.0.9'
+        Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
+        Get-Content (Join-Path $Installed 'DevStore.Agent.psm1') | Should -Be 'old'
+    }
+
+    It 'ignores Manager releases from before scripts had a version' {
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'unversioned'
+        Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
+    }
+
+    It 'upgrades installs from before scripts had a version' {
+        Remove-Item (Join-Path $Installed 'VERSION')
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'new'
+        Set-Content (Join-Path $Bundled 'VERSION') '2.1.0'
+        Update-DevStoreAgentFiles -Root $Root | Should -BeTrue
+    }
+
+    It 'leaves the same version alone' {
+        Set-Content (Join-Path $Bundled 'DevStore.Agent.psm1') 'same'
+        Set-Content (Join-Path $Bundled 'VERSION') '2.1.0'
         Update-DevStoreAgentFiles -Root $Root | Should -BeFalse
     }
 

@@ -620,21 +620,30 @@ function Update-DevStoreCatalog {
     Write-DevStoreJson -Path $catPath -Object @{ updated = Get-DevStoreTimestamp; account = $main; apps = $apps }
 }
 
+function Get-DevStoreAgentVersion {
+    # The VERSION file next to the updater scripts; $null when missing or unreadable.
+    param([string]$Dir)
+    $file = Join-DevStorePath $Dir 'VERSION'
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try { return [version]((Get-Content -LiteralPath $file -Raw).Trim()) } catch { return $null }
+}
+
 function Update-DevStoreAgentFiles {
     # Self-update: the Manager's release carries the updater scripts in agent\.
-    # Copy them over C:\DevStore\agent when they differ. Returns $true if updated.
+    # Copy them over <Root>\agent only if they are a newer version: never back.
     param([string]$Root)
     $bundled = Join-DevStorePath $Root 'apps' 'devstore-manager' 'current' 'agent'
     if (-not (Test-Path -LiteralPath $bundled)) { return $false }
     $target = Join-DevStorePath $Root 'agent'
-    $changed = $false
-    foreach ($f in @(Get-ChildItem -LiteralPath $bundled -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })) {
-        $dest = Join-DevStorePath $target $f.Name
-        $same = (Test-Path -LiteralPath $dest) -and ((Get-FileHash -LiteralPath $f.FullName).Hash -eq (Get-FileHash -LiteralPath $dest).Hash)
-        if (-not $same) { Copy-Item -LiteralPath $f.FullName -Destination $dest -Force; $changed = $true }
+    $new = Get-DevStoreAgentVersion -Dir $bundled
+    if ($null -eq $new) { return $false }   # Manager releases from before scripts had a version
+    $old = Get-DevStoreAgentVersion -Dir $target
+    if ($null -ne $old -and $new -le $old) { return $false }
+    foreach ($f in @(Get-ChildItem -LiteralPath $bundled -File | Where-Object { $_.Extension -in '.ps1', '.psm1' -or $_.Name -eq 'VERSION' })) {
+        Copy-Item -LiteralPath $f.FullName -Destination (Join-DevStorePath $target $f.Name) -Force
     }
-    if ($changed) { Write-DevStoreLog -Root $Root -Message 'updater scripts updated from the DevStore Manager release' }
-    return $changed
+    Write-DevStoreLog -Root $Root -Message "updater scripts updated to $new from the DevStore Manager release"
+    return $true
 }
 
 function Initialize-DevStoreLayout {

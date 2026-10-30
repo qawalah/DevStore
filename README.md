@@ -36,7 +36,7 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 | `templates/app-repo/` | Files every Android app repo gets |
 | `templates/windows-app-repo/` | Files every Windows app repo gets |
 | `scripts/create-signing-key.sh` | Creates the one shared Android signing key |
-| `windows/agent/` | DevStore Updater (PowerShell) + Pester tests |
+| `windows/agent/` | DevStore Updater (PowerShell) + Pester tests. **Bump `windows/agent/VERSION` with every updater change**: installed updaters only self-update to a higher version |
 | `windows/manager/` | DevStore Manager (Python/tkinter) + pytest tests |
 | `windows/setup/` | `DevStoreSetup.exe` installer (released by `setup-release.yml`) |
 | `templates/app-repo-both/` | Release workflow for a repo with both an Android app and a Windows part |
