@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -47,7 +49,7 @@ class Api:
                     if a.get("type") == "service" and a.get("name")]
         self._services = actions.service_statuses(services)
         view = store.build_view(config, state, catalog, self._services, actions.pending_requests(),
-                                dt.datetime.now(dt.timezone.utc))
+                                dt.datetime.now(dt.timezone.utc), running=actions.running_apps())
         for a in view["apps"]:
             a["iconData"] = self._image(a.get("icon"))
         self._view = view
@@ -95,6 +97,28 @@ class Api:
         if app is None:
             return {"ok": False, "message": "App not found."}
         return self._result(lambda: actions.launch(actions.app_exe(app["name"], app["exe"])), f"Opening {app['displayName']}.")
+
+    def relaunch_app(self, repo: str) -> dict:
+        """Force close, then open again. For DevStore itself: open the new version, then quit this one."""
+        app = self._find(repo)
+        if app is None:
+            return {"ok": False, "message": "App not found."}
+        if app["isSelf"]:
+            def restart_self() -> None:
+                actions.launch(actions.app_exe(app["name"], app["exe"]))
+                threading.Timer(0.8, os._exit, args=(0,)).start()
+            return self._result(restart_self, "Restarting DevStore…")
+        return self._result(lambda: actions.relaunch_app(app["name"], app["exe"]), f"Restarted {app['displayName']}.")
+
+    def close_app(self, repo: str) -> dict:
+        app = self._find(repo)
+        if app is None or app["isSelf"]:
+            return {"ok": False, "message": "App not found."}
+
+        def close() -> None:
+            if actions.close_app(app["name"]) == 0:
+                raise ValueError(f"{app['displayName']} wasn't running, or Windows didn't allow closing it.")
+        return self._result(close, f"Closed {app['displayName']}.")
 
     def open_data(self, repo: str) -> dict:
         app = self._find(repo)

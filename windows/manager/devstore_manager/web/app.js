@@ -27,10 +27,15 @@ const ACTIONS = {
   start: { label: "Start", icon: "play", cls: "btn-primary", call: (r) => api().service(r, "Start") },
   stop: { label: "Stop", icon: "stop", cls: "btn-quiet", call: (r) => api().service(r, "Stop") },
   restart: { label: "Restart", icon: "restart", cls: "btn-quiet", call: (r) => api().service(r, "Restart") },
+  relaunch: { label: "Restart", icon: "restart", cls: "btn-primary", call: (r) => api().relaunch_app(r) },
+  close: { label: "Force close", icon: "stop", cls: "btn-quiet", call: (r) => api().close_app(r),
+    confirm: (name) => `Force close ${name}?\n\nAnything you haven't saved in it will be lost.` },
   data: { label: "Data folder", icon: "folder", cls: "btn-quiet", call: (r) => api().open_data(r) },
-  remove: { label: "Remove", icon: "trash", cls: "btn-danger", call: (r) => api().remove(r), confirm: true },
+  remove: { label: "Remove", icon: "trash", cls: "btn-danger", call: (r) => api().remove(r),
+    confirm: (name) => `Remove ${name} from this PC?\n\nIts data folder is kept.` },
 };
 
+const SECONDARY = ["data", "remove"];   // shown under the details box, not in the header
 let view = null;
 let route = { name: "discover", repo: null };
 let search = "";
@@ -157,7 +162,7 @@ function addHtml() {
 }
 
 function cardHtml(a) {
-  const primary = a.actions.find((x) => ["install", "open", "start"].includes(x));
+  const primary = a.actions.find((x) => ["install", "open", "start", "relaunch"].includes(x));
   const meta = [a.type, a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`].filter(Boolean).join(" · ");
   return `<article class="card" data-goto="${esc(a.repo)}" tabindex="0">
     <div class="card-head">${iconHtml(a)}<div style="min-width:0"><div class="card-name">${esc(a.displayName)}</div><div class="card-meta">${esc(meta)}</div></div></div>
@@ -215,14 +220,15 @@ async function renderApp(v) {
     <button class="link detail-back" data-nav="${route.from || "discover"}">${ICONS.back}<span>Back</span></button>
     <div class="detail-head">${iconHtml(a, "lg")}
       <div><h1 class="detail-title">${esc(a.displayName)}</h1><div class="detail-sub">${esc(a.type || "App")} · ${esc(a.repo)}</div></div>
-      <div class="detail-actions">${a.actions.map((x) => buttonHtml(x, a.repo)).join("")}</div>
+      <div class="detail-actions">${a.actions.filter((x) => !SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div>
     </div>
     ${notice}
     <div class="shots" id="shots"></div>
     <div class="detail-body">
       <div><h2 style="margin-top:0">About</h2><p class="about">${esc(a.description || "No description yet. Add one to devstore.json in the app's repo.")}</p>
         <h2>Activity</h2><div class="log" id="app-log">Loading…</div></div>
-      <aside class="facts">${facts}</aside>
+      <aside><div class="facts">${facts}</div>
+        <div class="side-actions">${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
     </div>`;
   const d = await api().get_details(a.repo);
   if (route.name !== "app" || route.repo !== a.repo) return;
@@ -253,7 +259,7 @@ async function runAction(btn) {
   const { action, repo } = btn.dataset;
   const a = ACTIONS[action];
   const app = view.apps.find((x) => x.repo === repo);
-  if (a.confirm && !confirm(`Remove ${app ? app.displayName : repo} from this PC?\n\nIts data folder is kept.`)) return;
+  if (a.confirm && !confirm(a.confirm(app ? app.displayName : repo))) return;
   btn.classList.add("busy");
   btn.disabled = true;
   const res = await a.call(repo);

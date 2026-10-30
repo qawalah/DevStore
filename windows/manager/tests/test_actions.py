@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import sys
+
 import pytest
 
 from devstore_manager import actions
@@ -101,3 +103,36 @@ def test_check_now_falls_back_to_admin_prompt(root, monkeypatch):
     monkeypatch.setattr(actions, "start_updater", lambda: True)
     actions.check_now()
     assert len(calls) == 1
+
+
+def test_apps_from_process_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(actions, "ROOT", tmp_path)
+    procs = [(1, str(tmp_path / "apps" / "tool" / "current" / "tool.exe")),
+             (2, str(tmp_path / "APPS" / "Tool" / "versions" / "1.0.0" / "helper.exe")),
+             (3, str(tmp_path / "apps" / "other" / "current" / "other.exe")),
+             (4, r"C:\Windows\explorer.exe"), (5, "")]
+    assert actions.apps_from_processes(procs) == {"tool", "other"}
+    assert actions.pids_for_app(procs, "tool") == [1, 2]
+    assert actions.pids_for_app(procs, "missing") == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs real Windows processes")
+def test_force_close_a_real_running_app(tmp_path, monkeypatch):
+    # A copy of ping.exe stands in for an installed app.
+    import shutil
+    import subprocess
+    import time
+    monkeypatch.setattr(actions, "ROOT", tmp_path)
+    exe = tmp_path / "apps" / "pinger" / "current" / "pinger.exe"
+    exe.parent.mkdir(parents=True)
+    shutil.copy(r"C:\Windows\System32\PING.EXE", exe)
+    p = subprocess.Popen([str(exe), "-n", "60", "127.0.0.1"], stdout=subprocess.DEVNULL)
+    try:
+        time.sleep(1)
+        assert "pinger" in actions.running_apps()
+        assert actions.close_app("pinger") >= 1
+        p.wait(timeout=10)
+        assert "pinger" not in actions.running_apps()
+    finally:
+        if p.poll() is None:
+            p.kill()
