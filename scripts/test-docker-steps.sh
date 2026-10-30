@@ -37,8 +37,42 @@ test_cleanup() {
   echo "OK cleanup plan (2 fixtures)"
 }
 
+test_smoke() {
+  step smoke-test
+  local broken="unhealthy no-healthcheck exits" v start took
+  docker build -q -t devstore-smoke/hello samples/hello-docker > /dev/null
+  for v in $broken; do
+    docker build -q -t "devstore-smoke/$v" -f "samples/hello-docker-broken/Dockerfile.$v" samples/hello-docker-broken > /dev/null
+  done
+  # smoke <image> <log name>
+  smoke() { IMAGE=$1 HEALTH_TIMEOUT=30 bash -eo pipefail "$TMP/smoke-test.sh" > "$TMP/smoke-$2.log" 2>&1; }
+  if ! smoke devstore-smoke/hello hello; then
+    cat "$TMP/smoke-hello.log"
+    echo "FAIL: smoke test refused samples/hello-docker"
+    exit 1
+  fi
+  for v in $broken; do
+    start=$SECONDS
+    if smoke "devstore-smoke/$v" "$v"; then
+      cat "$TMP/smoke-$v.log"
+      echo "FAIL: smoke test passed Dockerfile.$v"
+      exit 1
+    fi
+    took=$((SECONDS - start))
+    # Broken images must be refused as soon as Docker knows, not after the 30 s timeout.
+    if [ "$took" -ge 20 ]; then
+      cat "$TMP/smoke-$v.log"
+      echo "FAIL: Dockerfile.$v was refused only after ${took}s"
+      exit 1
+    fi
+    echo "  Dockerfile.$v refused after ${took}s"
+  done
+  echo "OK smoke (4 images)"
+}
+
 case "${1:-all}" in
   cleanup) test_cleanup ;;
-  all) test_cleanup ;;
+  smoke) test_smoke ;;
+  all) test_cleanup; test_smoke ;;
   *) echo "usage: $0 cleanup|smoke|all"; exit 2 ;;
 esac

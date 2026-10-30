@@ -51,6 +51,41 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Start the image and wait for its own HEALTHCHECK to pass (probed every 2 s).
+      # Uses only environment variables, so scripts/test-docker-steps.sh can run it as is.
+      - name: Smoke test (must turn healthy)
+        id: smoke-test
+        env:
+          IMAGE: ${{ env.IMAGE_REF }}:${{ env.APP_VERSION }}
+          HEALTH_TIMEOUT: ${{ inputs.health-timeout }}
+        run: |
+          hc=$(docker image inspect -f '{{json .Config.Healthcheck}}' "$IMAGE")
+          if [ -z "$hc" ] || [ "$hc" = null ] || [ "$(echo "$hc" | jq -r '.Test[0] // "NONE"')" = NONE ]; then
+            echo "::error::$IMAGE has no HEALTHCHECK. Add one to the Dockerfile: DevStore only publishes an image after it reports healthy."
+            exit 1
+          fi
+          cid=$(docker run -d --health-interval=2s "$IMAGE")
+          trap 'echo "--- container log (last 50 lines)"; docker logs "$cid" 2>&1 | tail -n 50; docker rm -f "$cid" > /dev/null' EXIT
+          for i in $(seq 1 "$HEALTH_TIMEOUT"); do
+            state=$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")
+            case "$state" in
+              "running healthy")
+                echo "$IMAGE is healthy after ${i}s."
+                exit 0 ;;
+              "running unhealthy")
+                echo "::error::$IMAGE turned unhealthy. Last health check output:"
+                docker inspect -f '{{range .State.Health.Log}}{{.Output}}{{end}}' "$cid" | tail -n 5
+                exit 1 ;;
+              running*)
+                sleep 1 ;;
+              *)
+                echo "::error::$IMAGE stopped before turning healthy (status '$state', exit code $(docker inspect -f '{{.State.ExitCode}}' "$cid"))."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::$IMAGE was not healthy within ${HEALTH_TIMEOUT}s."
+          exit 1
+
       # Uses only environment variables, so scripts/test-docker-steps.sh can run it as is.
       - name: Plan cleanup
         id: plan-cleanup

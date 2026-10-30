@@ -1,0 +1,5 @@
+{
+  "name": "hello-docker",
+  "description": "Sample that the DevStore self-test builds with the Docker pipeline.",
+  "version": "1.0.0"
+}
