@@ -97,6 +97,28 @@ The image is built on GitHub, published privately to
 5. If Docker is available, run
    `docker build --build-arg VERSION=<version> -t test .` and start it once.
 
+## 3e. Store screenshots and icon (every app)
+DevStore shows screenshots per platform only from
+`store/screenshots/<windows|android|docker>/*.png` (at the repo root, or next
+to `devstore.json`). It shows up to 6 per platform, sorted by file name. Chat
+exports usually put them somewhere else, so move them in now:
+1. Look for images the handover brought: `store-listing/`, `screenshots/`,
+   `docs/screenshots/`, `docs/images/`, `windows/docs/screenshots/` and any
+   folder or file `HANDOVER.md` calls screenshots. Ignore app resources
+   (`res/`, `mipmap-*`, `drawable-*`, `*.xcassets`, `static/`), icons and
+   feature graphics.
+2. Sort them by platform: phone or tablet shots go to `android/`, desktop
+   windows to `windows/`, and the server's web UI to `docker/`. A web client
+   rendered at phone size counts as `android`.
+3. Copy (don't move) up to 6 PNGs per platform into
+   `store/screenshots/<platform>/`, renamed `01-<what>.png`, `02-…` in the
+   order to show, with the best one first. Keep the originals, since a Play
+   listing or the docs may still use them.
+4. If the app has no Windows `icon` in `devstore.json`, copy a 512×512 PNG
+   icon to `store/icon.png`.
+5. If `HANDOVER.md` mentions screenshots that weren't in the zip, say so in
+   your report so the user can add them.
+
 ## 4. Finish
 1. Keep `HANDOVER.md` in the repo.
 2. Commit everything, with a message like "Onboard into DevStore", and push

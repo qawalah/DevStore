@@ -35,7 +35,8 @@ Usage the user types, from a session on `qawalah/devstore` or on the app repo:
 ## 2. Set it up
 Follow DevStore `docs/handover/onboard-repo.md` sections 1 to 3 exactly
 (unpack, decide every platform part, add the templates from DevStore
-`templates/`). Read those files from the local DevStore checkout if there is
+`templates/`, and put the screenshots in `store/screenshots/<platform>/`,
+section 3e). Read those files from the local DevStore checkout if there is
 one, otherwise with the GitHub tools.
 
 ## 3. Push and watch

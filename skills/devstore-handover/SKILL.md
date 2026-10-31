@@ -25,6 +25,11 @@ the latest version of each file from this conversation.
   `__pycache__/`), APKs or EXEs, keystores (`*.jks`, `*.keystore`),
   passwords, API keys or `local.properties`.
 - Put the project at the **root of the zip**, not inside an extra folder.
+- **Screenshots:** if this conversation has screenshots or store images of
+  the app, include them as PNG files in
+  `store/screenshots/<android|windows|docker>/` (up to 6 per platform, named
+  `01-….png`, `02-….png` in the order to show), plus a 512×512
+  `store/icon.png`. DevStore shows them on the app's page.
 
 ## 2. HANDOVER.md (at the root of the zip)
 - **What the app does**, in a few sentences, plus its main features.
