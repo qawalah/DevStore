@@ -166,7 +166,7 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
 
 def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str],
                pending: dict[str, str], now: dt.datetime, running: Optional[set] = None,
-               self_version: Optional[str] = None) -> dict:
+               self_version: Optional[str] = None, progress: Optional[dict] = None) -> dict:
     """Everything the window renders. `pending` maps repo -> 'install'/'remove' for
     requests the updater hasn't picked up yet; `services` maps devstore-<name> -> status;
     `running` holds the names of window apps that are open right now."""
@@ -230,7 +230,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         problems.insert(0, {"repo": "", "title": "Couldn't list your GitHub apps", "detail": explain(state["catalogError"])})
 
     return {
-        "updater": _updater(state, now, has_errors=bool(problems)),
+        "updater": _progress(progress, now) or _updater(state, now, has_errors=bool(problems)),
         "problems": problems,
         "apps": apps,
         "counts": {
@@ -246,10 +246,21 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
     }
 
 
+def _progress(progress: Optional[dict], now: dt.datetime) -> Optional[dict]:
+    """While a check runs: what it's doing. Ignored if not updated for 10 minutes (crashed run)."""
+    if not isinstance(progress, dict) or not progress.get("running"):
+        return None
+    updated = _parse_utc(progress.get("updated"))
+    if updated is None or now - updated > dt.timedelta(minutes=10):
+        return None
+    text = str(progress.get("text") or "Looking for updates")
+    return {"kind": "busy", "title": "Checking now…", "sub": text.rstrip(".…") + "…"}
+
+
 def _updater(state: dict, now: dt.datetime, has_errors: bool) -> dict:
     last = _parse_utc(state.get("lastRun"))
     if last is None:
-        return {"kind": "none", "title": "Waiting for first check", "sub": "DevStore checks for updates every 10 minutes."}
+        return {"kind": "none", "title": "Waiting for first check", "sub": "DevStore checks for updates every 5 minutes."}
     result = str(state.get("lastRunResult") or "")
     if result.startswith("failed"):
         return {"kind": "error", "title": "Updater problem", "sub": explain(result.partition(": ")[2] or result)}

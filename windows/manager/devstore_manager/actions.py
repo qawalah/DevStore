@@ -166,6 +166,8 @@ def set_channel(repo: str, channel: str) -> None:
 
 
 def check_now() -> None:
+    # The request makes a check that's already running do one more pass afterwards.
+    _write_request("check")
     if not start_updater():
         run_elevated("Start-DevStoreCheck.ps1")  # older install: the task isn't startable without admin yet
 

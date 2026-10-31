@@ -118,6 +118,21 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
+      # Keep downloaded packages between builds (much faster rebuilds).
+      - uses: actions/cache@v4
+        if: env.APP_LANG == 'dotnet'
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles(format('{0}/**/*.csproj', inputs.working-directory), format('{0}/**/*.props', inputs.working-directory)) }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        if: env.APP_LANG == 'python'
+        with:
+          path: ~/AppData/Local/pip/Cache
+          key: pip-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/requirements.txt', inputs.working-directory)) }}
+          restore-keys: pip-${{ runner.os }}-${{ inputs.python-version }}-
+
       - name: Build (C#/.NET)
         if: env.APP_LANG == 'dotnet'
         run: |

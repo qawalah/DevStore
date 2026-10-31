@@ -249,3 +249,18 @@ def test_followed_pr_without_builds_explains_the_fallback():
 def test_stable_by_default():
     a = app(view(cat=catalog(**{"qawalah/t": {}})), "qawalah/t")
     assert a["channel"] == "stable" and a["previews"] == [] and a["testBuild"] is None
+
+
+def test_updater_shows_what_it_is_doing_now():
+    prog = {"running": True, "text": "Downloading simdeck-companion 1.4.1-pr1.4",
+            "started": "2026-10-30T11:59:00Z", "updated": "2026-10-30T11:59:50Z"}
+    u = store.build_view({"apps": []}, {"lastRun": T, "lastRunResult": "ok"}, {}, {}, {}, NOW, progress=prog)["updater"]
+    assert u["kind"] == "busy"
+    assert u["title"] == "Checking now…"
+    assert u["sub"] == "Downloading simdeck-companion 1.4.1-pr1.4…"
+
+
+def test_stale_progress_is_ignored():
+    prog = {"running": True, "text": "Looking for updates", "started": "2026-10-30T10:00:00Z", "updated": "2026-10-30T10:00:05Z"}
+    u = store.build_view({"apps": []}, {"lastRun": T, "lastRunResult": "ok"}, {}, {}, {}, NOW, progress=prog)["updater"]
+    assert u["kind"] == "ok"
