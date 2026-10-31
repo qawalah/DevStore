@@ -152,3 +152,15 @@ def test_apply_update_and_set_update_modes(root, monkeypatch):
         actions.set_updates("qawalah/t", "sometimes")
     with pytest.raises(ValueError):
         actions.set_updates(None, "default")
+
+
+def test_set_channel_writes_request(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.set_channel("qawalah/t", "pr-12")
+    actions.set_channel("qawalah/t", "stable")
+    bodies = [json.loads(f.read_text()) for f in sorted((root / "requests").glob("*.json"))]
+    assert {"action": "set-channel", "repo": "qawalah/t", "channel": "pr-12"} in bodies
+    assert {"action": "set-channel", "repo": "qawalah/t", "channel": "stable"} in bodies
+    with pytest.raises(ValueError):
+        actions.set_channel("qawalah/t", "pr-x")

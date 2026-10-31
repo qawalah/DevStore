@@ -157,6 +157,14 @@ def set_updates(repo: str | None, mode: str) -> None:
     start_updater()
 
 
+def set_channel(repo: str, channel: str) -> None:
+    """'stable', or 'pr-<N>' to install a pull request's test builds instead."""
+    if not REPO_RE.match(repo) or not re.match(r"^(stable|pr-\d{1,6})$", channel):
+        raise ValueError(f"Can't switch {repo!r} to {channel!r}.")
+    _write_request("set-channel", repo, channel=channel)
+    start_updater()
+
+
 def check_now() -> None:
     if not start_updater():
         run_elevated("Start-DevStoreCheck.ps1")  # older install: the task isn't startable without admin yet

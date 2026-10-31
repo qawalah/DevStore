@@ -46,3 +46,12 @@ worldwide enforcement planned for 2027. Where it applies, unregistered apps
 (like yours) still install if you turn on the **advanced sideloading
 option** in Developer Options once. There's a one-time 24-hour wait. Check
 this again before 2027.
+
+## Test builds (before a pull request is merged)
+Each pull request in an app's repo also publishes a test build as a
+**pre-release**. In Obtainium, open the app → settings → turn on **Include
+prereleases** to get them; turn it off to go back to normal releases.
+
+Android only accepts an update with the same or a higher `versionCode`. If a
+test build raised `versionCode`, going back to the stable release needs an
+uninstall first. Raise `versionCode` only when the change is ready to release.
