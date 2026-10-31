@@ -195,7 +195,7 @@ code { font: 12.5px var(--mono); background: var(--surface-2); padding: 1px 5px;
 .notice.error { background: var(--error-soft); border-color: transparent; }
 .notice.warn { background: var(--warn-soft); border-color: transparent; }
 .notice strong { display: block; margin-bottom: 2px; }
-.shots { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 10px; margin-top: 22px; scroll-snap-type: x mandatory; }
+.shots { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 10px; margin-top: 22px; scroll-snap-type: x proximity; }
 .shots img { height: 240px; border-radius: 10px; box-shadow: var(--shadow); scroll-snap-align: start; background: var(--surface); }
 .detail-body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; margin-top: 22px; }
 .about { max-width: 70ch; color: var(--text); white-space: pre-line; }
