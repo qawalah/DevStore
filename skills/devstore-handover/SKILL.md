@@ -1,6 +1,6 @@
 ---
 name: devstore-handover
-description: Use when the user says "hand over to DevStore", "move this to a repo", "export for Claude Code" or "package this app for DevStore". Packages the app built in this chat as <app>-handover.zip with a HANDOVER.md, ready for the devstore-onboard skill in Claude Code.
+description: Use when the user says "hand over to DevStore", "move this to a repo", "export for Claude Code" or "package this app for DevStore". Packages the app built in this chat as a handover zip (app-name-handover.zip) with a HANDOVER.md, ready for the devstore-onboard skill in Claude Code.
 ---
 
 # DevStore handover (chat side)
