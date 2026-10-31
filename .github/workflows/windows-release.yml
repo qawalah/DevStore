@@ -23,6 +23,9 @@ on:
 
 jobs:
   release:
+    # Pull requests from branches in the same repo get a test build (a pre-release
+    # tagged windows-v<version>-pr<N>.<run>); a closed PR's builds are deleted below.
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: windows-latest
     defaults:
       run:
@@ -32,8 +35,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Read devstore.json
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if (-not (Test-Path devstore.json)) { Write-Output "::error::devstore.json not found in ${{ inputs.working-directory }}"; exit 1 }
           $m = Get-Content devstore.json -Raw | ConvertFrom-Json
@@ -75,7 +81,9 @@ jobs:
           if ($lang -eq 'go' -and -not $entry) { $entry = '.' }   # Go: the package to build, e.g. ./cmd/server
           "APP_NAME=$($m.name)" >> $env:GITHUB_ENV
           "APP_TYPE=$($m.type)" >> $env:GITHUB_ENV
-          "APP_VERSION=$($m.version)" >> $env:GITHUB_ENV
+          $version = $m.version
+          if ($env:PR_NUMBER) { $version = "$version-pr$($env:PR_NUMBER).$($env:GITHUB_RUN_NUMBER)" }   # test build
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
           "APP_ENTRY=$entry" >> $env:GITHUB_ENV
           "APP_LANG=$lang" >> $env:GITHUB_ENV
 
@@ -210,11 +218,27 @@ jobs:
           "STORE_DIR=$store" >> $env:GITHUB_ENV
 
       - name: Publish GitHub Release
-        if: inputs.publish
+        # Pull requests from forks get no write token: build check only.
+        if: inputs.publish && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          if ($env:PR_NUMBER) {
+            $tag = "windows-v$($env:APP_VERSION)"
+            gh release create $tag $env:ZIP "$($env:ZIP).sha256" @(Get-ChildItem $env:STORE_DIR -File | ForEach-Object { $_.FullName }) `
+              --target $env:HEAD_SHA --prerelease --latest=false `
+              --title "PR #$($env:PR_NUMBER): $($env:PR_TITLE)" --notes "Test build of pull request #$($env:PR_NUMBER) ($($env:HEAD_SHA.Substring(0,7))). Not a normal release."
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            # Keep only this PR's newest test build.
+            $old = gh release list --limit 200 --json tagName --jq '.[].tagName' | Where-Object { $_ -match "^windows-v.*-pr$($env:PR_NUMBER)\.\d+$" -and $_ -ne $tag }
+            foreach ($t in $old) { gh release delete $t --cleanup-tag --yes | Out-Null; Write-Output "Deleted older test build $t" }
+            Write-Output "::notice::Published test build $tag"
+            exit 0
+          }
           $tag = "windows-v$($env:APP_VERSION)"
           git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
           if ($LASTEXITCODE -eq 0) {
@@ -226,3 +250,18 @@ jobs:
             --title "Windows $($env:APP_NAME) $($env:APP_VERSION)" --notes "Built from $($env:GITHUB_SHA.Substring(0,7)) by DevStore."
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output "::notice::Published $tag"
+
+  # A closed pull request: delete its test builds (pre-releases and their tags).
+  cleanup-pr-builds:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this PR's test builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -E "^windows-v.*-pr${PR}\.[0-9]+" | while read -r tag; do
+            gh release delete "$tag" --cleanup-tag --yes && echo "Deleted $tag"
+          done || true

@@ -117,3 +117,13 @@ A repo owned by another person's account works too, with three differences:
 3. **Access on your PC:** the owner creates a read-only token for you, and you
    add it in `DevStoreSetup.exe` with **Add as another GitHub account** (see
    `docs/windows-setup.md`).
+
+## Turning on test builds for an app onboarded earlier
+
+Repos onboarded before test builds existed need one change: in the app's
+`.github/workflows/release.yml`, add a `pull_request` trigger. Tell the app's
+Claude Code session:
+
+> In `.github/workflows/release.yml`, add `pull_request: types: [opened,
+> synchronize, reopened, closed]` under `on:`, like DevStore's
+> `templates/app-repo-both/.github/workflows/release.yml`, and push to main.

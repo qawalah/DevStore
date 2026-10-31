@@ -111,6 +111,11 @@ class Api:
                   "notify": "DevStore only tells you about updates", "default": "Updates follow your default setting"}
         return self._result(lambda: actions.set_updates(repo or None, mode), labels.get(mode, "Saved") + ".")
 
+    def set_channel(self, repo: str, channel: str) -> dict:
+        msg = "Switching to the stable release." if channel == "stable" else \
+            f"Switching to the test build of PR #{channel[3:]}. It installs within a minute."
+        return self._result(lambda: actions.set_channel(repo, channel), msg)
+
     def check_now(self) -> dict:
         return self._result(actions.check_now, "Checking for updates now.")
 

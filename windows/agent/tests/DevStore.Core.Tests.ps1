@@ -273,3 +273,49 @@ Describe 'Select-DevStoreRepoStoreFiles' {
         @($r.screenshots).Count | Should -Be 0
     }
 }
+
+Describe 'Test builds from pull requests' {
+    BeforeAll {
+        function New-Rel($Tag, [switch]$Pre, $Name = '') { [pscustomobject]@{ tag_name = $Tag; draft = $false; prerelease = [bool]$Pre; name = $Name; published_at = '' } }
+    }
+    It 'parses PR build tags' {
+        $t = ConvertFrom-DevStorePrTag 'windows-v1.3.0-pr12.7'
+        $t.version | Should -Be '1.3.0-pr12.7'
+        $t.pr | Should -Be 12
+        $t.build | Should -Be 7
+        ConvertFrom-DevStorePrTag 'windows-v1.3.0' | Should -BeNullOrEmpty
+    }
+    It 'stable ignores test builds; a PR channel takes that PR''s newest build' {
+        $rels = @((New-Rel 'windows-v1.2.0'), (New-Rel 'windows-v1.3.0-pr12.5' -Pre), (New-Rel 'windows-v1.3.0-pr12.9' -Pre), (New-Rel 'windows-v1.4.0-pr15.2' -Pre))
+        (Select-DevStoreChannelRelease -Releases $rels -Channel 'stable' -Bad @()).tag_name | Should -Be 'windows-v1.2.0'
+        (Select-DevStoreChannelRelease -Releases $rels -Channel 'pr-12' -Bad @()).tag_name | Should -Be 'windows-v1.3.0-pr12.9'
+        (Select-DevStoreChannelRelease -Releases $rels -Channel 'pr-12' -Bad @('1.3.0-pr12.9')).tag_name | Should -Be 'windows-v1.3.0-pr12.5'
+    }
+    It 'falls back to stable when the PR has no builds (closed)' {
+        $rels = @((New-Rel 'windows-v1.2.0'))
+        (Select-DevStoreChannelRelease -Releases $rels -Channel 'pr-99' -Bad @()).tag_name | Should -Be 'windows-v1.2.0'
+    }
+    It 'lists the newest build of each open PR' {
+        $rels = @((New-Rel 'windows-v1.2.0'), (New-Rel 'windows-v1.3.0-pr12.5' -Pre 'PR #12: New menu'), (New-Rel 'windows-v1.3.0-pr12.9' -Pre 'PR #12: New menu'), (New-Rel 'windows-v1.4.0-pr15.2' -Pre 'PR #15: Fix crash'))
+        $list = @(Get-DevStorePrBuilds -Releases $rels)
+        @($list | ForEach-Object { $_.pr }) | Should -Be @(12, 15)
+        $list[0].version | Should -Be '1.3.0-pr12.9'
+        $list[0].title | Should -Be 'PR #12: New menu'
+    }
+    It 'switching between stable and a test build counts as an update both ways' {
+        Get-DevStoreAction -AppState @{ installed = '1.2.0' } -Version '1.3.0-pr12.9' | Should -Be 'update'
+        Get-DevStoreAction -AppState @{ installed = '1.3.0-pr12.9' } -Version '1.2.0' | Should -Be 'update'
+        Get-DevStoreAction -AppState @{ installed = '1.3.0-pr12.9' } -Version '1.3.0-pr12.9' | Should -Be 'none'
+        Get-DevStoreAction -AppState @{ installed = '1.3.0' } -Version '1.2.0' | Should -Be 'none'
+    }
+    It 'reads the channel from config and accepts set-channel requests' {
+        $c = @{ apps = @(@{ repo = 'qawalah/a'; channel = 'pr-12' }, @{ repo = 'qawalah/b' }) }
+        Get-DevStoreChannel -Config $c -Repo 'qawalah/A' | Should -Be 'pr-12'
+        Get-DevStoreChannel -Config $c -Repo 'qawalah/b' | Should -Be 'stable'
+        $c = Set-DevStoreConfigChannel -Config $c -Repo 'qawalah/b' -Channel 'pr-3'
+        Get-DevStoreChannel -Config $c -Repo 'qawalah/b' | Should -Be 'pr-3'
+        (ConvertFrom-DevStoreRequest @{ action = 'set-channel'; repo = 'qawalah/a'; channel = 'pr-12' }).channel | Should -Be 'pr-12'
+        (ConvertFrom-DevStoreRequest @{ action = 'set-channel'; repo = 'qawalah/a'; channel = 'stable' }).channel | Should -Be 'stable'
+        ConvertFrom-DevStoreRequest @{ action = 'set-channel'; repo = 'qawalah/a'; channel = 'pr-x; rm' } | Should -BeNullOrEmpty
+    }
+}

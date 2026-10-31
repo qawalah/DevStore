@@ -31,7 +31,7 @@ def _by_repo(d: Any) -> dict[str, dict]:
 
 def _version(v: Any) -> tuple:
     try:
-        return tuple(int(x) for x in str(v).split("."))
+        return tuple(int(x) for x in str(v).split("-")[0].split("."))
     except ValueError:
         return ()
 
@@ -105,9 +105,18 @@ def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service:
         return st("update", f"Update downloaded: {s.get('latest', '?')}, ready to install", short="Downloaded")
     if s.get("restartPending"):
         return st("warn", f"Updated to {installed}: restart the app to use it", short="Restart to update")
+    if s.get("channelMissing") and str(s.get("channel", "")).startswith("pr-"):
+        pr = str(s["channel"])[3:]
+        return st("warn", f"PR #{pr} has no test build now, so the stable release is installed",
+                  "The pull request was closed or hasn't been built yet. Switch Version back to Stable, or wait for its build.",
+                  short="Test build not available")
     latest = s.get("latest")
-    if latest and _version(latest) > _version(installed) and latest not in (s.get("bad") or []):
+    if (latest and _test_build(installed) is None and _version(latest) > _version(installed)
+            and latest not in (s.get("bad") or [])):
         return st("busy", f"Updating to {latest}…")
+    test_pr = _test_build(installed)
+    if test_pr is not None:
+        return st("ok", f"Test build of PR #{test_pr} · up to date", short=f"Test build #{test_pr}")
     if s.get("type") == "service":
         if service == "Running":
             return st("ok", "Running · up to date")
@@ -118,6 +127,12 @@ def _status(s: Optional[dict], in_config: bool, pending: Optional[str], service:
     if running:
         return st("ok", "Running · up to date")
     return st("ok", "Installed · up to date")
+
+
+def _test_build(version: Any) -> Optional[int]:
+    """PR number if `version` is a pull-request test build like '1.3.0-pr12.9'."""
+    m = re.match(r"^\d+\.\d+\.\d+-pr(\d+)\.\d+$", str(version or ""))
+    return int(m.group(1)) if m else None
 
 
 def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str], is_self: bool,
@@ -162,6 +177,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
     entries = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and e.get("repo")]
     configured = {str(e["repo"]).lower(): str(e["repo"]) for e in entries}
     modes = {str(e["repo"]).lower(): e.get("updates") for e in entries if e.get("updates") in UPDATE_MODES}
+    channels = {str(e["repo"]).lower(): str(e["channel"]) for e in entries
+                if re.match(r"^(stable|pr-\d+)$", str(e.get("channel", "")))}
     default_mode = config.get("defaultUpdates") if isinstance(config, dict) else None
     default_mode = default_mode if default_mode in UPDATE_MODES else "auto"
     pend = {str(k).lower(): v for k, v in (pending or {}).items()}
@@ -198,6 +215,9 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "owner": c.get("owner") or repo.split("/")[0],
             "updates": modes.get(key, default_mode),
             "updatesIsDefault": key not in modes,
+            "channel": channels.get(key, "stable"),
+            "previews": [p for p in (c.get("previews") or []) if isinstance(p, dict) and p.get("pr")],
+            "testBuild": _test_build((s or {}).get("installed")),
             "exe": (s or {}).get("exe") or f"{name}.exe",
             "lastChecked": (s or {}).get("lastChecked") or "",
             "error": (s or {}).get("lastError") or "",

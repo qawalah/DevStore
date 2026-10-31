@@ -66,6 +66,20 @@ You can override this on each app's page.
   update** when it suits you.
 - **Just tell me:** nothing is downloaded until you click **Update**.
 
+### Test builds (before a pull request is merged)
+Every pull request from a branch in an app's repo gets its own **test build**,
+a pre-release that never touches the normal releases. To try one:
+1. Open the app's page in DevStore. Under **Version**, pick
+   **Test build: PR #N …** (the list shows each open pull request).
+2. It installs within a minute, and updates by itself on every new push to
+   that pull request.
+3. Pick **Stable releases** to go back. Closing or merging the pull request
+   deletes its test builds; DevStore then shows a note and keeps the stable
+   release.
+
+Pull requests from a *fork* can't be built this way (GitHub doesn't give
+them the signing secrets or permission to publish).
+
 ### Apps shared with you
 Apps in someone else's repo (where you're a collaborator) appear under
 **Shared**. GitHub doesn't let your own token read another person's repos,

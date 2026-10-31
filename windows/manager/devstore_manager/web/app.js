@@ -170,7 +170,8 @@ function addHtml() {
 
 function cardHtml(a) {
   const primary = a.actions.find((x) => ["update", "install", "open", "start", "relaunch"].includes(x));
-  const meta = [a.type, a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`, a.shared && `by ${a.owner}`]
+  const meta = [a.type, a.testBuild ? `Test build #${a.testBuild}` : a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`,
+    a.shared && `by ${a.owner}`]
     .filter(Boolean).join(" · ");
   return `<article class="card" data-goto="${esc(a.repo)}" tabindex="0">
     <div class="card-head">${iconHtml(a)}<div style="min-width:0"><div class="card-name">${esc(a.displayName)}</div><div class="card-meta">${esc(meta)}</div></div></div>
@@ -204,6 +205,17 @@ function modeSelect(id, value, withDefault) {
     .concat(MODES.map((m) => [m[0], m[1]]));
   return `<select class="select" id="${id}">${opts.map(([k, label]) =>
     `<option value="${k}"${k === value ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+}
+
+function channelSelect(a) {
+  // Stable releases, or a pull request's test build (installed before merging).
+  if (!a.installed || (!a.previews.length && a.channel === "stable")) return "";
+  const opts = [["stable", "Stable releases"]].concat(a.previews.map((p) => [`pr-${p.pr}`, `Test build: ${p.title}`]));
+  if (a.channel !== "stable" && !opts.some(([k]) => k === a.channel)) opts.push([a.channel, `Test build: PR #${a.channel.slice(3)} (no build now)`]);
+  return `<label class="field-label" for="app-channel">Version</label>
+    <select class="select" id="app-channel">${opts.map(([k, label]) =>
+      `<option value="${esc(k)}"${k === a.channel ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>
+    <p class="muted hint">Test builds come from pull requests that aren't merged yet. Switch back to Stable any time.</p>`;
 }
 
 function renderSettings(v) {
@@ -291,8 +303,15 @@ async function renderApp(v) {
         <h2>Activity</h2><div class="log" id="app-log">Loading…</div></div>
       <aside><div class="facts">${facts}</div>
         <label class="field-label" for="app-mode">Updates</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}
+        ${channelSelect(a)}
         <div class="side-actions">${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
     </div>`;
+  const ch = $("#app-channel");
+  if (ch) ch.addEventListener("change", async (e) => {
+    const res = await api().set_channel(a.repo, e.target.value);
+    toast(res.message, res.ok);
+    load();
+  });
   $("#app-mode").addEventListener("change", async (e) => {
     const res = await api().set_updates(a.repo, e.target.value);
     toast(res.message, res.ok);

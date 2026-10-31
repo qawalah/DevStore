@@ -224,3 +224,28 @@ def test_devstore_running_the_installed_version_is_not_waiting_for_a_restart():
     assert "relaunch" not in me["actions"]
     old = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"devstore-manager"}, self_version="2.0.2"), "qawalah/DevStore")
     assert old["status"]["text"].startswith("Updated to 2.1.0")
+
+
+def test_test_builds_are_listed_and_shown():
+    cat = catalog(**{"qawalah/t": {"previews": [{"pr": 12, "version": "1.3.0-pr12.9", "title": "PR #12: New menu"}]}})
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.3.0-pr12.9", "status": "ok", "channel": "pr-12"}}}
+    v = view(config={"apps": [{"repo": "qawalah/t", "channel": "pr-12"}]}, state=st, cat=cat)
+    a = app(v, "qawalah/t")
+    assert a["channel"] == "pr-12"
+    assert a["testBuild"] == 12
+    assert a["previews"][0]["title"] == "PR #12: New menu"
+    assert a["status"]["text"] == "Test build of PR #12 · up to date"
+
+
+def test_followed_pr_without_builds_explains_the_fallback():
+    st = {"apps": {"qawalah/t": {"name": "t", "type": "gui", "installed": "1.2.0", "status": "ok",
+                                 "channel": "pr-12", "channelMissing": True}}}
+    a = app(view(config={"apps": [{"repo": "qawalah/t", "channel": "pr-12"}]}, state=st), "qawalah/t")
+    assert a["status"]["kind"] == "warn"
+    assert a["status"]["text"] == "PR #12 has no test build now, so the stable release is installed"
+    assert a["testBuild"] is None
+
+
+def test_stable_by_default():
+    a = app(view(cat=catalog(**{"qawalah/t": {}})), "qawalah/t")
+    assert a["channel"] == "stable" and a["previews"] == [] and a["testBuild"] is None

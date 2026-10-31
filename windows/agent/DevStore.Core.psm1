@@ -80,11 +80,89 @@ function Write-DevStoreJson {
 }
 
 function Get-DevStoreAction {
-    # 'install' (nothing installed), 'update' (newer version) or 'none'.
+    # 'install' (nothing installed), 'update' (newer version, or a switch between
+    # a stable release and a pull-request test build, either way) or 'none'.
     param($AppState, [string]$Version)
     if ($null -eq $AppState -or -not $AppState['installed']) { return 'install' }
-    if ([version]$Version -gt [version]$AppState['installed']) { return 'update' }
+    $installed = [string]$AppState['installed']
+    if ($installed -eq $Version) { return 'none' }
+    if ($installed -match '-' -or $Version -match '-') { return 'update' }
+    if ([version]$Version -gt [version]$installed) { return 'update' }
     return 'none'
+}
+
+$script:PrTagPattern = '^windows-v(\d+\.\d+\.\d+)-pr(\d+)\.(\d+)$'
+
+function ConvertFrom-DevStorePrTag {
+    # 'windows-v1.3.0-pr12.7' -> @{ version = '1.3.0-pr12.7'; pr = 12; build = 7 }, else $null.
+    param([string]$Tag)
+    if ($Tag -match $script:PrTagPattern) {
+        return @{ version = "$($Matches[1])-pr$($Matches[2]).$($Matches[3])"; pr = [int]$Matches[2]; build = [int]$Matches[3] }
+    }
+    return $null
+}
+
+function Get-DevStorePrBuilds {
+    # Newest test build of each pull request: @{ pr; version; title; tag; publishedAt }, by PR number.
+    param($Releases)
+    $best = @{}
+    foreach ($r in @($Releases)) {
+        if ($null -eq $r -or $r.draft) { continue }
+        $t = ConvertFrom-DevStorePrTag $r.tag_name
+        if ($null -eq $t) { continue }
+        if (-not $best.ContainsKey($t.pr) -or $t.build -gt $best[$t.pr].build) {
+            $title = [string]$r.name
+            if (-not $title) { $title = "PR #$($t.pr)" }
+            $best[$t.pr] = @{ pr = $t.pr; build = $t.build; version = $t.version; title = $title
+                tag = $r.tag_name; publishedAt = [string]$r.published_at }
+        }
+    }
+    return @($best.Keys | Sort-Object | ForEach-Object { $best[$_] })
+}
+
+function Select-DevStoreChannelRelease {
+    # 'stable' -> newest normal release. 'pr-<N>' -> newest test build of that PR
+    # (not marked bad); falls back to stable when the PR has none (e.g. closed).
+    param($Releases, [string]$Channel = 'stable', [string[]]$Bad = @())
+    if ($Channel -match '^pr-(\d+)$') {
+        $pr = [int]$Matches[1]
+        $flat = foreach ($x in @($Releases)) { if ($x -is [System.Array]) { foreach ($y in $x) { $y } } else { $x } }
+        $best = $null; $bestBuild = -1
+        foreach ($r in @($flat)) {
+            if ($null -eq $r -or $r.draft) { continue }
+            $t = ConvertFrom-DevStorePrTag $r.tag_name
+            if ($null -eq $t -or $t.pr -ne $pr -or (@($Bad) -contains $t.version)) { continue }
+            if ($t.build -gt $bestBuild) { $best = $r; $bestBuild = $t.build }
+        }
+        if ($best) { return $best }
+    }
+    return Select-DevStoreRelease -Releases $Releases -Bad $Bad
+}
+
+function Get-DevStoreReleaseVersion {
+    # The version string a release installs as: '1.2.0' or '1.3.0-pr12.7'.
+    param($Release)
+    $t = ConvertFrom-DevStorePrTag $Release.tag_name
+    if ($t) { return $t.version }
+    return (ConvertFrom-DevStoreTag $Release.tag_name).ToString()
+}
+
+function Get-DevStoreChannel {
+    param([hashtable]$Config, [string]$Repo)
+    foreach ($e in @($Config['apps'])) {
+        if ($e -and $e['repo'] -ieq $Repo -and $e.ContainsKey('channel') -and $e['channel'] -match '^(stable|pr-\d+)$') { return $e['channel'] }
+    }
+    return 'stable'
+}
+
+function Set-DevStoreConfigChannel {
+    param([hashtable]$Config, [string]$Repo, [string]$Channel)
+    foreach ($e in @($Config['apps'])) {
+        if ($e -and $e['repo'] -ieq $Repo) {
+            if ($Channel -eq 'stable') { [void]$e.Remove('channel') } else { $e['channel'] = $Channel }
+        }
+    }
+    return $Config
 }
 
 function Get-DevStorePruneList {
@@ -168,6 +246,11 @@ function ConvertFrom-DevStoreRequest {
         if (-not $repo -and $mode -eq 'default') { return $null }
         if (-not $repo) { $repo = $null }
         return @{ action = $action; repo = $repo; mode = $mode }
+    }
+    if ($action -eq 'set-channel') {
+        $channel = [string]$Request['channel']
+        if ($channel -notmatch '^(stable|pr-\d{1,6})$' -or -not (Test-DevStoreRepoName $repo)) { return $null }
+        return @{ action = $action; repo = $repo; mode = $null; channel = $channel }
     }
     if ($action -notin @('install', 'remove', 'apply')) { return $null }
     if (-not (Test-DevStoreRepoName $repo)) { return $null }
@@ -281,4 +364,6 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
     ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets, Get-DevStoreUpdateMode, Set-DevStoreConfigUpdates,
-    ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry, Select-DevStoreRepoStoreFiles
+    ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry, Select-DevStoreRepoStoreFiles,
+    ConvertFrom-DevStorePrTag, Get-DevStorePrBuilds, Select-DevStoreChannelRelease, Get-DevStoreReleaseVersion,
+    Get-DevStoreChannel, Set-DevStoreConfigChannel
