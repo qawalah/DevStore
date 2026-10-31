@@ -238,6 +238,14 @@ function ConvertFrom-DevStoreRequest {
     if ($null -eq $Request -or $Request -isnot [hashtable] -or -not $Request.ContainsKey('action')) { return $null }
     $action = [string]$Request['action']
     if ($action -eq 'check') { return @{ action = 'check'; repo = $null; mode = $null } }
+    if ($action -eq 'set-nas') {
+        # Watchtower's address ('' turns NAS status off) and API token ('' keeps the stored one).
+        $url = [string]$Request['url']
+        $token = [string]$Request['token']
+        if ($url -and $url -notmatch $script:NasUrlPattern) { return $null }
+        if ($token -and ($token.Length -gt 256 -or $token -match '\s')) { return $null }
+        return @{ action = $action; repo = $null; mode = $null; url = $url; token = $token }
+    }
     $repo = [string]$Request['repo']
     if ($action -eq 'set-updates') {
         $mode = [string]$Request['mode']
@@ -411,6 +419,90 @@ function ConvertTo-DevStoreStarredEntry {
     return @{ repo = $name; description = [string]$Repo.description; url = $repoUrl; avatar = $avatar; latest = $latest }
 }
 
+# ---------------------------------------------------------------- Docker apps on the NAS
+
+$script:DockerTagPattern = '^docker-v(\d+\.\d+\.\d+)$'
+$script:NasUrlPattern = '^https?://[A-Za-z0-9.-]+(:\d{1,5})?/?$'
+
+function ConvertTo-DevStoreUtcText {
+    # API times as 'yyyy-MM-ddTHH:mm:ssZ'. PowerShell 7 turns ISO strings into DateTime;
+    # 5.1 leaves them as text.
+    param($Value)
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture) }
+    return [string]$Value
+}
+
+function Get-DevStoreDockerRelease {
+    # The newest published docker-v<X.Y.Z> release (by number), with the image its
+    # notes name ("Image `ghcr.io/o/n:1.2.3`", written by docker-release.yml).
+    param($Releases)
+    $best = $null
+    $bestVersion = $null
+    foreach ($r in @($Releases)) {
+        if ($null -eq $r -or $r.draft -or $r.prerelease) { continue }
+        $m = [regex]::Match([string]$r.tag_name, $script:DockerTagPattern)
+        if (-not $m.Success) { continue }
+        $v = [version]$m.Groups[1].Value
+        if ($null -eq $bestVersion -or $v -gt $bestVersion) { $best = $r; $bestVersion = $v }
+    }
+    if ($null -eq $best) { return $null }
+    $image = $null
+    $name = $null
+    $im = [regex]::Match([string]$best.body, 'ghcr\.io/[A-Za-z0-9._/-]+')
+    if ($im.Success) {
+        $image = $im.Value.ToLowerInvariant()
+        $name = ($image -split '/')[-1]
+    }
+    return @{ version = $bestVersion.ToString(); tag = [string]$best.tag_name; publishedAt = (ConvertTo-DevStoreUtcText $best.published_at); image = $image; name = $name }
+}
+
+function ConvertTo-DevStoreImageName {
+    # 'GHCR.io/O/n:latest' or '...@sha256:...' -> 'ghcr.io/o/n' (registry ports are kept).
+    param([string]$Image)
+    $i = $Image.ToLowerInvariant()
+    $at = $i.IndexOf('@')
+    if ($at -ge 0) { $i = $i.Substring(0, $at) }
+    $colon = $i.LastIndexOf(':')
+    if ($colon -gt $i.LastIndexOf('/')) { $i = $i.Substring(0, $colon) }
+    return $i
+}
+
+function Get-DevStoreNasApps {
+    # Per repo with a Docker release: what the NAS runs, from Watchtower's containers.
+    # ok = running the newest version; pending = Watchtower hasn't updated it yet;
+    # stopped; missing = no container uses the image.
+    param([hashtable]$Docker, $Containers, [string]$LastScan)
+    $scan = $null
+    if ($LastScan) { try { $scan = [DateTimeOffset]::Parse($LastScan, [Globalization.CultureInfo]::InvariantCulture) } catch { $scan = $null } }
+    $out = @{}
+    foreach ($repo in @($Docker.Keys)) {
+        $d = $Docker[$repo]
+        $entry = @{ name = $d['name']; latest = $d['version']; publishedAt = $d['publishedAt']; container = $null; status = 'missing' }
+        $c = $null
+        if ($d['image']) {
+            $c = @($Containers | Where-Object { $_ -and $_.image -and (ConvertTo-DevStoreImageName ([string]$_.image)) -eq $d['image'] }) | Select-Object -First 1
+        }
+        if ($c) {
+            $entry['container'] = [string]$c.name
+            $published = $null
+            try { $published = [DateTimeOffset]::Parse([string]$d['publishedAt'], [Globalization.CultureInfo]::InvariantCulture) } catch { $published = $null }
+            if (-not $c.running) { $entry['status'] = 'stopped' }
+            elseif ($c.stale -or $null -eq $scan -or ($published -and $scan -lt $published)) { $entry['status'] = 'pending' }
+            else { $entry['status'] = 'ok' }
+        }
+        $out[$repo] = $entry
+    }
+    return $out
+}
+
+function Set-DevStoreConfigNas {
+    # Watchtower's address for NAS status; '' turns it off.
+    param([hashtable]$Config, [string]$Url)
+    if ($Url) { $Config['nas'] = @{ watchtower = $Url } }
+    elseif ($Config.ContainsKey('nas')) { $Config.Remove('nas') }
+    return $Config
+}
+
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
@@ -418,4 +510,5 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry, Select-DevStoreRepoStoreFiles,
     ConvertFrom-DevStorePrTag, Get-DevStorePrBuilds, Select-DevStoreChannelRelease, Get-DevStoreReleaseVersion,
     Get-DevStoreChannel, Set-DevStoreConfigChannel, Test-DevStoreStarredDue, Get-DevStoreGitHubUrl,
-    ConvertTo-DevStoreStarredEntry
+    ConvertTo-DevStoreStarredEntry, Get-DevStoreDockerRelease, ConvertTo-DevStoreImageName, Get-DevStoreNasApps,
+    Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText

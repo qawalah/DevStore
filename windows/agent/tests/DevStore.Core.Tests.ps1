@@ -359,3 +359,96 @@ Describe 'Starred repos (watch only)' {
         @($e.latest.assets).Count | Should -Be 0
     }
 }
+
+Describe 'Get-DevStoreDockerRelease' {
+    BeforeAll {
+        function New-DockerRelease($Tag, $Image = 'ghcr.io/qawalah/werd-server', [switch]$Draft, [switch]$Prerelease, $At = '2026-10-31T10:00:00Z') {
+            $v = $Tag -replace '^docker-v', ''
+            [pscustomobject]@{ tag_name = $Tag; draft = [bool]$Draft; prerelease = [bool]$Prerelease; published_at = $At; assets = @()
+                body = "Image ``$($Image):$v`` (also ``latest``). Built from abc1234 by DevStore." }
+        }
+    }
+    It 'picks the highest docker-v version by number and reads the image from the notes' {
+        $r = Get-DevStoreDockerRelease -Releases @((New-DockerRelease 'docker-v1.9.0'), (New-DockerRelease 'docker-v1.10.0'), (New-Release 'windows-v9.0.0'))
+        $r.version | Should -Be '1.10.0'
+        $r.tag | Should -Be 'docker-v1.10.0'
+        $r.image | Should -Be 'ghcr.io/qawalah/werd-server'
+        $r.name | Should -Be 'werd-server'
+        $r.publishedAt | Should -Be '2026-10-31T10:00:00Z'
+    }
+    It 'skips drafts, prereleases and malformed tags' {
+        $r = Get-DevStoreDockerRelease -Releases @((New-DockerRelease 'docker-v1.0.0'), (New-DockerRelease 'docker-v2.0.0' -Draft),
+            (New-DockerRelease 'docker-v3.0.0' -Prerelease), (New-DockerRelease 'docker-v4.0'))
+        $r.version | Should -Be '1.0.0'
+    }
+    It 'returns nothing without a docker release' {
+        Get-DevStoreDockerRelease -Releases @((New-Release 'windows-v1.0.0')) | Should -BeNullOrEmpty
+    }
+    It 'lower-cases the image' {
+        (Get-DevStoreDockerRelease -Releases @((New-DockerRelease 'docker-v1.0.0' -Image 'ghcr.io/Qawalah/Werd-Server'))).image |
+            Should -Be 'ghcr.io/qawalah/werd-server'
+    }
+}
+
+Describe 'Get-DevStoreNasApps' {
+    BeforeAll {
+        $docker = @{ 'qawalah/werd' = @{ version = '1.8.0'; name = 'werd-server'; image = 'ghcr.io/qawalah/werd-server'; publishedAt = '2026-10-31T10:00:00Z' } }
+        function New-Container($Image = 'ghcr.io/qawalah/werd-server:latest', $Running = $true, $Stale = $false) {
+            [pscustomobject]@{ name = 'werd-server'; image = $Image; running = $Running; stale = $Stale }
+        }
+        function Get-Status($Containers, $Scan = '2026-10-31T10:05:00Z') {
+            (Get-DevStoreNasApps -Docker $docker -Containers $Containers -LastScan $Scan)['qawalah/werd']
+        }
+    }
+    It 'is ok when the container runs, is not stale, and was scanned after the release' {
+        $a = Get-Status @(New-Container)
+        $a.status | Should -Be 'ok'
+        $a.latest | Should -Be '1.8.0'
+        $a.container | Should -Be 'werd-server'
+        $a.name | Should -Be 'werd-server'
+    }
+    It 'is pending when Watchtower says the image is stale' {
+        (Get-Status @(New-Container -Stale $true)).status | Should -Be 'pending'
+    }
+    It 'is pending when Watchtower has not scanned since the release' {
+        (Get-Status @(New-Container) -Scan '2026-10-31T09:55:00Z').status | Should -Be 'pending'
+        (Get-Status @(New-Container) -Scan $null).status | Should -Be 'pending'
+    }
+    It 'is stopped when the container is not running' {
+        (Get-Status @(New-Container -Running $false)).status | Should -Be 'stopped'
+    }
+    It 'is missing when no container uses the image' {
+        $a = Get-Status @(New-Container -Image 'nickfedor/watchtower:1.23.2')
+        $a.status | Should -Be 'missing'
+        $a.container | Should -BeNullOrEmpty
+    }
+    It 'matches images with a digest, a pinned version or other letter case' {
+        (Get-Status @(New-Container -Image 'GHCR.io/Qawalah/werd-server@sha256:abc')).status | Should -Be 'ok'
+        (Get-Status @(New-Container -Image 'ghcr.io/qawalah/werd-server:1.8.0')).status | Should -Be 'ok'
+        (Get-Status @(New-Container -Image 'ghcr.io/qawalah/werd-server-other:latest')).status | Should -Be 'missing'
+    }
+}
+
+Describe 'NAS settings' {
+    It 'accepts set-nas requests with an address and token' {
+        $r = ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'http://192.168.1.20:8081'; token = 'abc123' }
+        $r.action | Should -Be 'set-nas'
+        $r.url | Should -Be 'http://192.168.1.20:8081'
+        $r.token | Should -Be 'abc123'
+        (ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'https://nas.tail1234.ts.net/'; token = '' }).url | Should -Be 'https://nas.tail1234.ts.net/'
+        (ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = ''; token = '' }).url | Should -Be ''
+    }
+    It 'rejects bad addresses and tokens' {
+        ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'ftp://nas'; token = 'x' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'http://nas/v1/containers'; token = 'x' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'http://n as'; token = 'x' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'http://nas:8081'; token = 'a b' } | Should -BeNullOrEmpty
+        ConvertFrom-DevStoreRequest @{ action = 'set-nas'; url = 'http://nas:8081'; token = ('x' * 257) } | Should -BeNullOrEmpty
+    }
+    It 'stores and clears the Watchtower address in config' {
+        $c = Set-DevStoreConfigNas -Config @{ apps = @() } -Url 'http://nas:8081'
+        $c['nas']['watchtower'] | Should -Be 'http://nas:8081'
+        $c = Set-DevStoreConfigNas -Config $c -Url ''
+        $c.ContainsKey('nas') | Should -BeFalse
+    }
+}

@@ -120,13 +120,15 @@ function render() {
   $("#count-installed").textContent = view.counts.installed || "";
   $("#count-shared").textContent = view.counts.shared || "";
   $("#count-starred").textContent = view.counts.starredNew ? `${view.counts.starredNew} new` : "";
+  $("#count-nas").textContent = view.counts.nas || "";
   renderBanner();
-  $(".search").hidden = ["app", "activity", "settings", "star"].includes(route.name);
+  $(".search").hidden = ["app", "activity", "settings", "star", "nas"].includes(route.name);
   $(".topbar").hidden = route.name === "app" || route.name === "star";
   if (route.name === "discover") renderDiscover(v);
   else if (route.name === "installed") renderInstalled(v);
   else if (route.name === "shared") renderShared(v);
   else if (route.name === "settings") renderSettings(v);
+  else if (route.name === "nas") renderNas(v);
   else if (route.name === "starred") renderStarred(v);
   else if (route.name === "star") renderStar(v);
   else if (route.name === "activity") renderActivity(v);
@@ -242,14 +244,50 @@ function renderSettings(v) {
       ${folder("programs", "Programs", (loc.programs || "") + "\\<app name>")}
       ${folder("data", "App data", (loc.data || "") + "\\<app name>  (kept when an app is removed)")}
       ${folder("logs", "DevStore logs", loc.logs || "")}</div></section>
+    <section><h2>NAS</h2>
+      <p class="muted">Shows which version of each Docker app your NAS runs, read from Watchtower's API (see docs/nas-setup.md in DevStore). The token is stored encrypted and only the updater can read it.</p>
+      <form class="add-row nas-form" id="nas-form">
+        <input id="nas-url" placeholder="Watchtower address, e.g. http://192.168.1.20:8081" value="${esc(view.nas.url)}" autocomplete="off" spellcheck="false" aria-label="Watchtower address">
+        <input id="nas-token" type="password" placeholder="${view.nas.configured ? "Token (leave empty to keep it)" : "Watchtower API token"}" autocomplete="off" aria-label="Watchtower API token">
+        <button class="btn btn-quiet" type="submit"><span>Save</span></button>
+        ${view.nas.configured ? '<button class="btn btn-danger" type="button" id="nas-off"><span>Turn off</span></button>' : ""}
+      </form></section>
     <section><h2>GitHub accounts</h2><div class="facts">${accounts}</div>
       <p class="muted">To add apps from someone else's repo, ask them for a read-only token, then run DevStoreSetup.exe and tick <em>Add as another GitHub account</em>.</p></section>
     <p class="muted">DevStore ${esc(st.version || "")}</p></div>`;
+  $("#nas-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const res = await api().set_nas($("#nas-url").value, $("#nas-token").value);
+    toast(res.message, res.ok);
+    if (res.ok) $("#nas-token").value = "";
+    load();
+  });
+  const off = $("#nas-off");
+  if (off) off.addEventListener("click", async () => {
+    if (!confirm("Turn off NAS status?\n\nThe saved Watchtower token is deleted from this PC.")) return;
+    const res = await api().set_nas("", "");
+    toast(res.message, res.ok);
+    load();
+  });
   $("#default-mode").addEventListener("change", async (e) => {
     const res = await api().set_updates(null, e.target.value);
     toast(res.message, res.ok);
     load();
   });
+}
+
+// ---------------------------------------------------------------- NAS (Docker apps)
+
+function renderNas(v) {
+  $("#view-title").textContent = "NAS";
+  const n = view.nas;
+  const head = `<div class="nas-head">${stateHtml({ kind: n.header.kind, text: n.header.title })}<p class="muted">${esc(n.header.sub)}</p>` +
+    (n.configured ? "" : '<p><button class="link" data-nav="settings">Set up NAS status in Settings</button></p>') + "</div>";
+  const list = n.apps.length ? `<div class="rows">${n.apps.map((a) => `
+    <div class="row nas-row"><div style="min-width:0"><div class="row-name">${esc(a.name)} <span class="chip">Docker</span></div>
+      <div class="row-sub">${stateHtml({ kind: a.kind, text: a.text })} <span class="muted">· ${esc(a.repo)}</span></div></div></div>`).join("")}</div>`
+    : emptyHtml("No Docker apps yet", "Docker apps appear here after their first Docker release (a docker-v… release on GitHub).");
+  v.innerHTML = head + list;
 }
 
 // ---------------------------------------------------------------- starred (watch only)

@@ -165,6 +165,21 @@ def set_channel(repo: str, channel: str) -> None:
     start_updater()
 
 
+NAS_URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d{1,5})?/?$")
+
+
+def set_nas(url: str, token: str) -> None:
+    """Watchtower's address and API token for NAS status ('' address = off,
+    '' token = keep the saved one). The updater stores the token encrypted."""
+    url, token = (url or "").strip(), (token or "").strip()
+    if url and not NAS_URL_RE.match(url):
+        raise ValueError("Enter Watchtower's address like http://192.168.1.20:8081")
+    if token and (len(token) > 256 or re.search(r"\s", token)):
+        raise ValueError("That token is too long or has spaces in it. Copy it again from the Watchtower settings.")
+    _write_request("set-nas", url=url, token=token)
+    start_updater()
+
+
 def check_now() -> None:
     # The request makes a check that's already running do one more pass afterwards.
     _write_request("check")
