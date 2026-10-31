@@ -311,7 +311,9 @@ def _nas_header(configured: bool, error: str, failed: int, last_scan: Optional[d
             return h("error", "No Watchtower token saved", "Enter it in Settings → NAS.")
         if "isn't turned on" in low:
             return h("error", "Watchtower's API is off", error)
-        return h("error", "Can't reach the NAS", f"{error} Is the NAS on, and is this PC at home or on Tailscale?")
+        if low.startswith("can't reach"):
+            return h("error", "Can't reach the NAS", f"{error} Is the NAS on, and is this PC at home or on Tailscale?")
+        return h("error", "NAS status problem", error)
     sub = f"Watchtower checked {ago(last_scan, now)}" if last_scan else "Watchtower hasn't checked yet"
     if failed:
         return h("warn", f"Watchtower: {_plural(failed, 'update')} failed at its last check", sub)

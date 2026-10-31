@@ -452,3 +452,11 @@ Describe 'NAS settings' {
         $c.ContainsKey('nas') | Should -BeFalse
     }
 }
+
+Describe 'Get-DevStoreNasApps with sparse container entries' {
+    It 'treats a container without running and stale fields as running and current' {
+        $docker = @{ 'qawalah/werd' = @{ version = '1.8.0'; name = 'werd-server'; image = 'ghcr.io/qawalah/werd-server'; publishedAt = '2026-10-31T10:00:00Z' } }
+        $c = @([pscustomobject]@{ name = 'werd-server'; image = 'ghcr.io/qawalah/werd-server:latest' }, [pscustomobject]@{ name = 'odd' })
+        (Get-DevStoreNasApps -Docker $docker -Containers $c -LastScan '2026-10-31T10:05:00Z')['qawalah/werd'].status | Should -Be 'ok'
+    }
+}

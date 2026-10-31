@@ -424,6 +424,16 @@ function ConvertTo-DevStoreStarredEntry {
 $script:DockerTagPattern = '^docker-v(\d+\.\d+\.\d+)$'
 $script:NasUrlPattern = '^https?://[A-Za-z0-9.-]+(:\d{1,5})?/?$'
 
+function Get-DevStoreProperty {
+    # $Object.$Name, or $null when it isn't there (strict mode throws on missing properties).
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [hashtable]) { return $Object[$Name] }
+    $p = $Object.PSObject.Properties[$Name]
+    if ($p) { return $p.Value }
+    return $null
+}
+
 function ConvertTo-DevStoreUtcText {
     # API times as 'yyyy-MM-ddTHH:mm:ssZ'. PowerShell 7 turns ISO strings into DateTime;
     # 5.1 leaves them as text.
@@ -480,14 +490,15 @@ function Get-DevStoreNasApps {
         $entry = @{ name = $d['name']; latest = $d['version']; publishedAt = $d['publishedAt']; container = $null; status = 'missing' }
         $c = $null
         if ($d['image']) {
-            $c = @($Containers | Where-Object { $_ -and $_.image -and (ConvertTo-DevStoreImageName ([string]$_.image)) -eq $d['image'] }) | Select-Object -First 1
+            $c = @($Containers | Where-Object { (Get-DevStoreProperty $_ 'image') -and (ConvertTo-DevStoreImageName ([string](Get-DevStoreProperty $_ 'image'))) -eq $d['image'] }) | Select-Object -First 1
         }
         if ($c) {
-            $entry['container'] = [string]$c.name
+            $entry['container'] = [string](Get-DevStoreProperty $c 'name')
             $published = $null
             try { $published = [DateTimeOffset]::Parse([string]$d['publishedAt'], [Globalization.CultureInfo]::InvariantCulture) } catch { $published = $null }
-            if (-not $c.running) { $entry['status'] = 'stopped' }
-            elseif ($c.stale -or $null -eq $scan -or ($published -and $scan -lt $published)) { $entry['status'] = 'pending' }
+            $running = Get-DevStoreProperty $c 'running'
+            if ($null -ne $running -and -not $running) { $entry['status'] = 'stopped' }
+            elseif ((Get-DevStoreProperty $c 'stale') -or $null -eq $scan -or ($published -and $scan -lt $published)) { $entry['status'] = 'pending' }
             else { $entry['status'] = 'ok' }
         }
         $out[$repo] = $entry
@@ -511,4 +522,4 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     ConvertFrom-DevStorePrTag, Get-DevStorePrBuilds, Select-DevStoreChannelRelease, Get-DevStoreReleaseVersion,
     Get-DevStoreChannel, Set-DevStoreConfigChannel, Test-DevStoreStarredDue, Get-DevStoreGitHubUrl,
     ConvertTo-DevStoreStarredEntry, Get-DevStoreDockerRelease, ConvertTo-DevStoreImageName, Get-DevStoreNasApps,
-    Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText
+    Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText, Get-DevStoreProperty

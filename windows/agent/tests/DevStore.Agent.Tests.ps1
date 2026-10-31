@@ -822,3 +822,16 @@ Describe 'NAS status (Watchtower)' {
             $Uri -eq 'http://nas:8081/v1/containers/details' -and $Headers.Authorization -eq 'Bearer s3cret' -and $TimeoutSec -eq 10 }
     }
 }
+
+Describe 'Watchtower answers before its first scan' {
+    It 'reads a status without summary or timestamp, and details without containers' {
+        Mock -ModuleName DevStore.Agent Invoke-RestMethod {
+            if ($Uri -like '*/v1/containers/details') { return [pscustomobject]@{ api_version = 'v1' } }
+            return [pscustomobject]@{ api_version = 'v1' }
+        }
+        $w = Get-DevStoreWatchtower -Url 'http://nas:8081' -Token 's3cret'
+        $w.failed | Should -Be 0
+        $w.lastScan | Should -BeNullOrEmpty
+        @($w.containers).Count | Should -Be 0
+    }
+}
