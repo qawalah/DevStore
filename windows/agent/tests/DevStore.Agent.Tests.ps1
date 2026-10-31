@@ -352,6 +352,7 @@ Describe 'Invoke-DevStoreUpdaterRun' {
         Mock -ModuleName DevStore.Agent Read-DevStoreTokens { @(@{ login = 'qawalah'; token = 'token' }) }
         Mock -ModuleName DevStore.Agent Initialize-DevStoreLayout {}
         Mock -ModuleName DevStore.Agent Update-DevStoreCatalog {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreStarred {}
         Mock -ModuleName DevStore.Agent Update-DevStoreAgentFiles { $false }
     }
 
@@ -692,5 +693,46 @@ Describe 'Update checks requested during a run' {
         $p.started | Should -Not -BeNullOrEmpty
         Clear-DevStoreProgress -Root $Root
         Test-Path (Join-Path $Root 'progress.json') | Should -BeFalse
+    }
+}
+
+Describe 'Update-DevStoreStarred' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Get-DevStoreStarredRepos {
+            @([pscustomobject]@{ full_name = 'someone/tool'; description = 'A tool'; html_url = 'https://github.com/someone/tool'; owner = $null },
+              [pscustomobject]@{ full_name = 'qawalah/Werd'; description = 'mine'; html_url = 'https://github.com/qawalah/Werd'; owner = $null })
+        }
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases {
+            @([pscustomobject]@{ tag_name = 'v1.0'; name = 'One'; draft = $false; prerelease = $false; published_at = ''; body = 'notes'
+                html_url = 'https://github.com/someone/tool/releases/tag/v1.0'; assets = @() })
+        }
+    }
+
+    It 'lists starred repos owned by others with their latest release' {
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' })
+        $st = Read-DevStoreJson -Path (Join-Path $Root 'starred.json') -Default @{}
+        @($st.repos | ForEach-Object { $_.repo }) | Should -Be @('someone/tool')
+        $st.repos[0].latest.tag | Should -Be 'v1.0'
+        $st.updated | Should -Not -BeNullOrEmpty
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreStarredRepos -Times 1 -ParameterFilter { $Login -eq 'qawalah' }
+    }
+
+    It 'reads stars at most hourly unless forced' {
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' })
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' })
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreStarredRepos -Times 1 -Exactly
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -Force
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreStarredRepos -Times 2 -Exactly
+    }
+
+    It 'keeps the previous list and records the problem if GitHub fails' {
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' })
+        Mock -ModuleName DevStore.Agent Get-DevStoreStarredRepos { throw 'HTTP 500' }
+        Update-DevStoreStarred -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -Force
+        $st = Read-DevStoreJson -Path (Join-Path $Root 'starred.json') -Default @{}
+        @($st.repos).Count | Should -Be 1
+        $st.error | Should -Match '500'
     }
 }
