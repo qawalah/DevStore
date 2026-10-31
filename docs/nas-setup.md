@@ -52,11 +52,15 @@ Watchtower reads its login from that same file.
        image: nickfedor/watchtower:1.23.2
        container_name: watchtower
        restart: unless-stopped
+       ports:
+         - "8081:8080"                     # its read-only API, for DevStore on your PC (Werd uses 8080)
        volumes:
          - /var/run/docker.sock:/var/run/docker.sock
          - /root/.docker:/config:ro        # the ghcr.io login from step 3
        environment:
          - DOCKER_CONFIG=/config
+         - WATCHTOWER_HTTP_API_ENDPOINTS=containers,metrics   # read-only: what runs, and the last check
+         - WATCHTOWER_HTTP_API_TOKEN=choose-a-long-random-password
          - WATCHTOWER_LABEL_ENABLE=true    # only update containers labelled com.centurylinklabs.watchtower.enable=true
          - WATCHTOWER_POLL_INTERVAL=600    # check every 10 minutes
          - WATCHTOWER_CLEANUP=true         # remove the old image after an update
@@ -118,6 +122,24 @@ says `pull access denied`, Container Manager isn't using the SSH login, so
 use the command line above instead.
 
 Back up `/volume1/docker/werd/data` with Hyper Backup like any other folder.
+
+## See the NAS in DevStore (on your PC)
+The **NAS** page in the DevStore window shows, for each Docker app, the newest
+version and whether the NAS runs it: *Running the latest*, *Update waiting
+for Watchtower*, *Stopped on the NAS* or *Not running on the NAS*.
+
+1. In Watchtower's `docker-compose.yml` (step 4), replace
+   `choose-a-long-random-password` with a long random password of your own,
+   then run `sudo docker compose up -d` in `/volume1/docker/watchtower` again
+   (or **Build** the project in Container Manager).
+2. In DevStore → **Settings → NAS**, enter `http://<NAS address>:8081` and
+   that password, then **Save**. Use the NAS's Tailscale address if the PC is
+   often away from home.
+
+DevStore asks Watchtower every 10 minutes. Only the read-only parts of its API
+are turned on, so nothing on the PC can change containers. The password is
+stored encrypted on the PC, and only the DevStore updater can read it. Keep
+port 8081 on your home network or Tailscale; don't forward it to the internet.
 
 ## Rolling back
 GitHub keeps the newest two versions of each image. To go back one version:

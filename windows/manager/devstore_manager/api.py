@@ -160,6 +160,10 @@ class Api:
             f"Switching to the test build of PR #{channel[3:]}. It installs within a minute."
         return self._result(lambda: actions.set_channel(repo, channel), msg)
 
+    def set_nas(self, url: str, token: str) -> dict:
+        message = "Saved. DevStore checks the NAS now." if (url or "").strip() else "NAS status turned off."
+        return self._result(lambda: actions.set_nas(url, token), message)
+
     def check_now(self) -> dict:
         return self._result(actions.check_now, "Checking for updates now.")
 

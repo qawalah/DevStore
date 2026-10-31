@@ -228,9 +228,12 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
                 for a in apps if a["status"]["kind"] == "error"]
     if state.get("catalogError"):
         problems.insert(0, {"repo": "", "title": "Couldn't list your GitHub apps", "detail": explain(state["catalogError"])})
+    nas = build_nas(state, now)
+    problems += nas["problems"]
 
     return {
-        "updater": _progress(progress, now) or _updater(state, now, has_errors=bool(problems)),
+        "nas": nas,
+        "updater":_progress(progress, now) or _updater(state, now, has_errors=bool(problems)),
         "problems": problems,
         "apps": apps,
         "counts": {
@@ -238,6 +241,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "attention": sum(1 for a in apps if a["status"]["kind"] == "error"),
             "updates": sum(1 for a in apps if a["status"]["kind"] == "update"),
             "shared": sum(1 for a in apps if a["shared"]),
+            "nas": len(nas["problems"]),
         },
         "settings": {
             "defaultUpdates": default_mode,
@@ -281,3 +285,81 @@ def parse_activity(lines: list[str], limit: int = 200) -> list[dict]:
             app = m.group(2)
             out.append({"time": m.group(1), "app": "" if app == "-" else app, "text": m.group(3)})
     return list(reversed(out))[:limit]
+
+
+# ---------------------------------------------------------------- NAS (Docker apps)
+
+NAS_STATUSES = ("ok", "pending", "stopped", "missing")
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _nas_header(configured: bool, error: str, failed: int, last_scan: Optional[dt.datetime], statuses: list,
+                now: dt.datetime) -> dict:
+    def h(kind: str, title: str, sub: str) -> dict:
+        return {"kind": kind, "title": title, "sub": sub}
+
+    if not configured:
+        return h("none", "NAS status is off", "Add your Watchtower address in Settings → NAS to see what your NAS runs.")
+    if error:
+        low = error.lower()
+        if "rejected the token" in low:
+            return h("error", "Watchtower rejected the token", "Enter the token again in Settings → NAS.")
+        if "no watchtower token" in low:
+            return h("error", "No Watchtower token saved", "Enter it in Settings → NAS.")
+        if "isn't turned on" in low:
+            return h("error", "Watchtower's API is off", error)
+        return h("error", "Can't reach the NAS", f"{error} Is the NAS on, and is this PC at home or on Tailscale?")
+    sub = f"Watchtower checked {ago(last_scan, now)}" if last_scan else "Watchtower hasn't checked yet"
+    if failed:
+        return h("warn", f"Watchtower: {_plural(failed, 'update')} failed at its last check", sub)
+    pending = statuses.count("pending")
+    if pending:
+        return h("ok", f"{_plural(pending, 'update')} waiting for Watchtower", sub)
+    if statuses and all(x == "ok" for x in statuses):
+        return h("ok", "NAS runs the latest versions", sub)
+    return h("ok", "NAS status", sub)
+
+
+def build_nas(state: Any, now: dt.datetime) -> dict:
+    """Docker apps on the NAS, from the updater's state.nas: the newest version of each
+    and, when Watchtower is set up, whether the NAS runs it."""
+    nas = state.get("nas") if isinstance(state, dict) else None
+    nas = nas if isinstance(nas, dict) else {}
+    configured = bool(nas.get("url"))
+    error = str(nas.get("error") or "") if configured else ""
+    try:
+        failed = int(nas.get("failed") or 0) if configured else 0
+    except (TypeError, ValueError):
+        failed = 0
+    entries = nas.get("apps") if isinstance(nas.get("apps"), dict) else {}
+    apps = []
+    for repo, a in entries.items():
+        if not isinstance(a, dict):
+            continue
+        latest = str(a.get("latest") or "?")
+        status = a.get("status") if configured and not error and a.get("status") in NAS_STATUSES else "unknown"
+        if not configured:
+            kind, text = "none", f"Newest version {latest}"
+        elif status == "ok":
+            kind, text = "ok", f"Running the latest ({latest})"
+        elif status == "pending":
+            kind, text = "update", f"Update to {latest} waiting for Watchtower"
+        elif status == "stopped":
+            kind, text = "warn", "Stopped on the NAS"
+        elif status == "missing":
+            kind, text = "none", "Not running on the NAS"
+        else:
+            kind, text = "none", f"Unknown · newest is {latest}"
+        apps.append({"repo": str(repo), "name": str(a.get("name") or str(repo).split("/")[-1]), "latest": latest,
+                     "status": status, "kind": kind, "text": text})
+    apps.sort(key=lambda x: x["name"].lower())
+    header = _nas_header(configured, error, failed, _parse_utc(nas.get("lastScan")), [a["status"] for a in apps], now)
+    problems = []
+    if configured and (error or failed):
+        problems.append({"repo": "", "title": header["title"], "detail": header["sub"]})
+    problems += [{"repo": "", "title": f"{a['name']} is stopped on the NAS",
+                  "detail": "Start it again in Container Manager on the NAS."} for a in apps if a["status"] == "stopped"]
+    return {"configured": configured, "url": str(nas.get("url") or ""), "header": header, "apps": apps, "problems": problems}
