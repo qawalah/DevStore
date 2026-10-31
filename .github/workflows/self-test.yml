@@ -151,4 +151,7 @@ jobs:
           $app = Get-App
           if (-not $app -or $app.Value.status -ne 'ok') { throw "reinstall failed: $($app.Value.lastError)" }
           Write-Output 'OK: discovery, remove and install requests work'
+          $every = @((Get-ScheduledTask -TaskName 'DevStore Updater').Triggers | ForEach-Object { $_.Repetition.Interval } | Where-Object { $_ })
+          if ($every -notcontains 'PT5M') { throw "updater task doesn't repeat every 5 minutes: $every" }
+          if (Test-Path C:\DevStore\progress.json) { throw 'progress.json left behind after a run' }
           Get-Content C:\DevStore\logs\updater-*.log

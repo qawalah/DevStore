@@ -164,3 +164,11 @@ def test_set_channel_writes_request(root, monkeypatch):
     assert {"action": "set-channel", "repo": "qawalah/t", "channel": "stable"} in bodies
     with pytest.raises(ValueError):
         actions.set_channel("qawalah/t", "pr-x")
+
+
+def test_check_now_always_leaves_a_request(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.check_now()
+    bodies = [json.loads(f.read_text()) for f in (root / "requests").glob("*.json")]
+    assert {"action": "check"} in bodies

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   One DevStore Updater pass. Run by the "DevStore Updater" scheduled task
-  (as SYSTEM, at startup and every 10 minutes).
+  (as SYSTEM, at startup and every 5 minutes).
 #>
 param([string]$Root = 'C:\DevStore')
 

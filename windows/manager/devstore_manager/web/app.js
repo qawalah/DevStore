@@ -58,8 +58,9 @@ async function load() {
 
 function schedule() {
   clearTimeout(timer);
-  const busy = view && view.apps && view.apps.some((a) => a.status.kind === "busy");
-  timer = setTimeout(load, busy ? 3000 : 15000);
+  const checking = view && view.updater && view.updater.kind === "busy";
+  const busy = checking || (view && view.apps && view.apps.some((a) => a.status.kind === "busy"));
+  timer = setTimeout(load, checking ? 2000 : busy ? 3000 : 15000);
 }
 
 // ---------------------------------------------------------------- pieces
@@ -132,6 +133,9 @@ function render() {
 function renderUpdater(u) {
   $("#updater-dot").className = `dot ${u.kind}`;
   $("#updater-title").textContent = u.title;
+  const btn = $("#check-now");
+  if (u.kind === "busy") { btn.classList.add("busy"); btn.disabled = true; }
+  else if (!btn.dataset.clicked) { btn.classList.remove("busy"); btn.disabled = false; }
   $("#updater-sub").textContent = u.sub;
   $("#updater").title = `${u.title}. ${u.sub}`;
 }
@@ -153,7 +157,7 @@ function renderDiscover(v) {
   const apps = view.apps.filter((a) => !a.isSelf && !a.shared && matches(a));
   if (!view.apps.some((a) => !a.isSelf && !a.shared)) {
     v.innerHTML = emptyHtml("No Windows apps found yet",
-      "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within 10 minutes.") + addHtml();
+      "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within a few minutes.") + addHtml();
     return;
   }
   if (!apps.length) { v.innerHTML = emptyHtml("No matches", `Nothing matches “${esc(search)}”.`) + addHtml(); return; }
@@ -162,7 +166,7 @@ function renderDiscover(v) {
 
 function addHtml() {
   return `<form class="add" id="add-form">
-    <div class="add-text"><strong>Missing an app?</strong> Apps appear here by themselves within 10 minutes of their first Windows release. You can also add one by its GitHub name.</div>
+    <div class="add-text"><strong>Missing an app?</strong> Apps appear here by themselves within a few minutes of their first Windows release. You can also add one by its GitHub name.</div>
     <div class="add-row"><input id="add-repo" placeholder="owner/repo, e.g. qawalah/werd" autocomplete="off" spellcheck="false" aria-label="GitHub repo">
     <button class="btn btn-quiet" type="submit">${ICONS.download}<span>Add</span></button></div>
   </form>`;
@@ -384,11 +388,11 @@ document.addEventListener("submit", async (e) => {
 $("#search").addEventListener("input", (e) => { search = e.target.value.trim(); render(); });
 $("#check-now").addEventListener("click", async (e) => {
   const b = e.currentTarget;
-  b.classList.add("busy"); b.disabled = true;
+  b.classList.add("busy"); b.disabled = true; b.dataset.clicked = "1";
   const res = await api().check_now();
   toast(res.message, res.ok);
-  b.classList.remove("busy"); b.disabled = false;
-  setTimeout(load, 4000);
+  delete b.dataset.clicked;
+  setTimeout(load, 1500);
 });
 
 render();

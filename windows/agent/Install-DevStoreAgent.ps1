@@ -17,7 +17,7 @@
     - creates C:\DevStore and locks its permissions down
     - stores your GitHub token encrypted (DPAPI, this machine only)
     - downloads WinSW (the service wrapper) and checks its hash
-    - registers the "DevStore Updater" scheduled task (SYSTEM, at startup + every 10 min)
+    - registers the "DevStore Updater" scheduled task (SYSTEM, at startup + every 5 min)
     - adds the DevStore Manager app (repo qawalah/devstore) to the app list
 #>
 param(
@@ -119,12 +119,12 @@ if (-not $NoManager) { $config = Set-DevStoreConfigApp -Config $config -Repo $Ma
 elseif (-not $config.ContainsKey('apps')) { $config['apps'] = @() }
 Write-DevStoreJson -Path $configPath -Object $config
 
-# 6. Scheduled task: SYSTEM, at startup and every 10 minutes.
+# 6. Scheduled task: SYSTEM, at startup and every 5 minutes.
 $script = Join-Path (Join-Path $Root 'agent') 'DevStoreUpdater.ps1'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
     -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`" -Root `"$Root`""
 $every10 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
+    -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
 $atStartup = New-ScheduledTaskTrigger -AtStartup
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `

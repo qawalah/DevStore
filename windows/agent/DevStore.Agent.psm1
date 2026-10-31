@@ -382,6 +382,7 @@ function Update-DevStoreApp {
         $target = Join-DevStorePath $versionsDir $version
         $verified = Join-DevStorePath $target '.verified'
         if (-not (Test-Path -LiteralPath $verified)) {
+            Write-DevStoreProgress -Root $Root -Text "Downloading $name $version"
             $dl = Join-DevStorePath $Root 'downloads'
             if (-not (Test-Path -LiteralPath $dl)) { New-Item -ItemType Directory -Path $dl -Force | Out-Null }
             $zip = Join-DevStorePath $dl $zipAsset.name
@@ -425,6 +426,7 @@ function Update-DevStoreApp {
         $displayName = $name
         if ($manifest.ContainsKey('displayName') -and $manifest['displayName']) { $displayName = $manifest['displayName'] }
 
+        Write-DevStoreProgress -Root $Root -Text "Installing $name $version"
         $current = Join-DevStorePath $appDir 'current'
         $old = $s['installed']
 
@@ -621,6 +623,7 @@ function Update-DevStoreCatalog {
     }
     foreach ($repoInfo in $seen) {
         $repo = [string]$repoInfo.full_name
+        Write-DevStoreProgress -Root $Root -Text "Looking at $repo"
         $Token = $RepoTokens[$repo]
         $owner = ($repo -split '/')[0]
         try {
@@ -740,6 +743,19 @@ function Initialize-DevStoreLayout {
         & icacls.exe $req /grant '*S-1-5-32-545:(OI)(CI)M' /C /Q | Out-Null
     }
     $marker = Join-DevStorePath $Root 'agent' '.task-permission'
+    # Older installs checked every 10 minutes; check every 5. Changing the task
+    # can reset its permissions, so re-apply them right after.
+    $interval = Join-DevStorePath $Root 'agent' '.interval-5min'
+    if (-not (Test-Path -LiteralPath $interval)) {
+        try {
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            foreach ($tr in @($task.Triggers)) { if ($tr.Repetition -and $tr.Repetition.Interval) { $tr.Repetition.Interval = 'PT5M' } }
+            Set-ScheduledTask -InputObject $task | Out-Null
+            Set-Content -LiteralPath $interval -Value 'ok'
+            Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+        }
+        catch { Write-DevStoreLog -Root $Root -Message "couldn't change the check interval: $($_.Exception.Message)" }
+    }
     if (-not (Test-Path -LiteralPath $marker)) {
         try {
             $svc = New-Object -ComObject Schedule.Service
@@ -755,8 +771,108 @@ function Initialize-DevStoreLayout {
     }
 }
 
+function Write-DevStoreProgress {
+    # progress.json tells the DevStore window what the updater is doing right now.
+    param([string]$Root, [string]$Text)
+    try {
+        $path = Join-DevStorePath $Root 'progress.json'
+        $old = Read-DevStoreJson -Path $path -Default @{}
+        $started = $old['started']
+        if (-not $started) { $started = Get-DevStoreTimestamp }
+        Write-DevStoreJson -Path $path -Object @{ running = $true; text = $Text; started = $started; updated = Get-DevStoreTimestamp }
+    }
+    catch { }
+}
+
+function Clear-DevStoreProgress {
+    param([string]$Root)
+    Remove-Item -LiteralPath (Join-DevStorePath $Root 'progress.json') -Force -ErrorAction SilentlyContinue
+}
+
+function Invoke-DevStoreUpdaterPass {
+    # One pass over every app in config.json. Writes state.json.
+    param([string]$Root)
+    try { Initialize-DevStoreLayout -Root $Root } catch { Write-DevStoreLog -Root $Root -Message "layout: $($_.Exception.Message)" }
+    $configPath = Join-DevStorePath $Root 'config.json'
+    $config = Read-DevStoreJson -Path $configPath -Default @{ apps = @() }
+    $statePath = Join-DevStorePath $Root 'state.json'
+    $state = Read-DevStoreJson -Path $statePath -Default @{}
+    if (-not $state.ContainsKey('apps') -or $state['apps'] -isnot [hashtable]) { $state['apps'] = @{} }
+    $requests = Invoke-DevStoreRequests -Root $Root -Config $config -State $state
+    if ($requests['changed']) { $config = $requests['config']; Write-DevStoreJson -Path $configPath -Object $config }
+    $oldApps = @{}
+    if ($state.ContainsKey('apps') -and $state['apps'] -is [hashtable]) { $oldApps = $state['apps'] }
+    $newApps = @{}
+    $errors = 0
+    $runError = $null
+
+    try { $tokens = @(Read-DevStoreTokens -Root $Root) }
+    catch { $tokens = @(); $runError = $_.Exception.Message }
+    $token = $null
+    if ($tokens.Count -gt 0) { $token = $tokens[0]['token'] }
+    if (-not $runError -and -not $token) { $runError = 'no GitHub token stored. Run DevStoreSetup.exe again.' }
+
+    $releaseCache = @{}
+    $state['catalogError'] = $null
+    if ($token) {
+        $repoTokens = @{}
+        try { Update-DevStoreCatalog -Root $Root -Tokens $tokens -ReleaseCache $releaseCache -RepoTokens $repoTokens }
+        catch {
+            $state['catalogError'] = $_.Exception.Message
+            Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
+        }
+        foreach ($entry in @($config['apps'])) {
+            if ($null -eq $entry -or -not $entry['repo']) { continue }
+            $repo = [string]$entry['repo']
+            $prev = $null
+            if ($oldApps.ContainsKey($repo)) { $prev = $oldApps[$repo] }
+            try {
+                $cached = $null
+                $hit = @($releaseCache.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1
+                if ($hit) { $cached = $releaseCache[$hit] }
+                # The account that can read this repo; else one whose name matches the owner; else the main one.
+                $appToken = $token
+                $tk = @($repoTokens.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1
+                if ($tk) { $appToken = $repoTokens[$tk] }
+                else {
+                    $byOwner = @($tokens | Where-Object { $_['login'] -and $_['login'] -ieq ($repo -split '/')[0] }) | Select-Object -First 1
+                    if ($byOwner) { $appToken = $byOwner['token'] }
+                }
+                $mode = Get-DevStoreUpdateMode -Config $config -Repo $repo
+                $channel = Get-DevStoreChannel -Config $config -Repo $repo
+                $applyNow = @($requests['apply'] | Where-Object { $_ -ieq $repo }).Count -gt 0
+                $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `
+                    -Releases $cached -Mode $mode -Apply:$applyNow -Channel $channel)
+                if ($null -eq $s) { throw 'The updater returned no result for this app.' }
+            }
+            catch {
+                $s = Copy-DevStoreAppState $prev
+                $s['status'] = 'error'
+                $s['lastError'] = $_.Exception.Message
+                $s['lastChecked'] = Get-DevStoreTimestamp
+            }
+            if ($s['status'] -eq 'error') { $errors++ }
+            $newApps[$repo] = $s
+        }
+    }
+    else {
+        $newApps = $oldApps
+    }
+
+    try { [void](Update-DevStoreAgentFiles -Root $Root) } catch { Write-DevStoreLog -Root $Root -Message "self-update: $($_.Exception.Message)" }
+    $state['apps'] = $newApps
+    $state['accounts'] = @($tokens | ForEach-Object { $_['login'] } | Where-Object { $_ })   # names only, never tokens
+    $state['lastRun'] = Get-DevStoreTimestamp
+    if ($runError) { $state['lastRunResult'] = "failed: $runError" }
+    elseif ($errors -gt 0) { $state['lastRunResult'] = "$errors error(s)" }
+    else { $state['lastRunResult'] = 'ok' }
+    Write-DevStoreJson -Path $statePath -Object $state
+    if ($runError) { Write-DevStoreLog -Root $Root -Message "run failed: $runError" }
+}
+
 function Invoke-DevStoreUpdaterRun {
-    # One updater pass over every app in config.json. Writes state.json.
+    # Runs passes until no Manager request is waiting (at most 3), so a
+    # "Check for updates" clicked during a pass still gets its own pass.
     param([string]$Root)
     $mutex = New-Object System.Threading.Mutex($false, 'Global\DevStoreUpdater')
     if (-not $mutex.WaitOne(0)) {
@@ -764,84 +880,16 @@ function Invoke-DevStoreUpdaterRun {
         return
     }
     try {
-        try { Initialize-DevStoreLayout -Root $Root } catch { Write-DevStoreLog -Root $Root -Message "layout: $($_.Exception.Message)" }
-        $configPath = Join-DevStorePath $Root 'config.json'
-        $config = Read-DevStoreJson -Path $configPath -Default @{ apps = @() }
-        $statePath = Join-DevStorePath $Root 'state.json'
-        $state = Read-DevStoreJson -Path $statePath -Default @{}
-        if (-not $state.ContainsKey('apps') -or $state['apps'] -isnot [hashtable]) { $state['apps'] = @{} }
-        $requests = Invoke-DevStoreRequests -Root $Root -Config $config -State $state
-        if ($requests['changed']) { $config = $requests['config']; Write-DevStoreJson -Path $configPath -Object $config }
-        $oldApps = @{}
-        if ($state.ContainsKey('apps') -and $state['apps'] -is [hashtable]) { $oldApps = $state['apps'] }
-        $newApps = @{}
-        $errors = 0
-        $runError = $null
-
-        try { $tokens = @(Read-DevStoreTokens -Root $Root) }
-        catch { $tokens = @(); $runError = $_.Exception.Message }
-        $token = $null
-        if ($tokens.Count -gt 0) { $token = $tokens[0]['token'] }
-        if (-not $runError -and -not $token) { $runError = 'no GitHub token stored. Run DevStoreSetup.exe again.' }
-
-        $releaseCache = @{}
-        $state['catalogError'] = $null
-        if ($token) {
-            $repoTokens = @{}
-            try { Update-DevStoreCatalog -Root $Root -Tokens $tokens -ReleaseCache $releaseCache -RepoTokens $repoTokens }
-            catch {
-                $state['catalogError'] = $_.Exception.Message
-                Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
-            }
-            foreach ($entry in @($config['apps'])) {
-                if ($null -eq $entry -or -not $entry['repo']) { continue }
-                $repo = [string]$entry['repo']
-                $prev = $null
-                if ($oldApps.ContainsKey($repo)) { $prev = $oldApps[$repo] }
-                try {
-                    $cached = $null
-                    $hit = @($releaseCache.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1
-                    if ($hit) { $cached = $releaseCache[$hit] }
-                    # The account that can read this repo; else one whose name matches the owner; else the main one.
-                    $appToken = $token
-                    $tk = @($repoTokens.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1
-                    if ($tk) { $appToken = $repoTokens[$tk] }
-                    else {
-                        $byOwner = @($tokens | Where-Object { $_['login'] -and $_['login'] -ieq ($repo -split '/')[0] }) | Select-Object -First 1
-                        if ($byOwner) { $appToken = $byOwner['token'] }
-                    }
-                    $mode = Get-DevStoreUpdateMode -Config $config -Repo $repo
-                    $channel = Get-DevStoreChannel -Config $config -Repo $repo
-                    $applyNow = @($requests['apply'] | Where-Object { $_ -ieq $repo }).Count -gt 0
-                    $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `
-                        -Releases $cached -Mode $mode -Apply:$applyNow -Channel $channel)
-                    if ($null -eq $s) { throw 'The updater returned no result for this app.' }
-                }
-                catch {
-                    $s = Copy-DevStoreAppState $prev
-                    $s['status'] = 'error'
-                    $s['lastError'] = $_.Exception.Message
-                    $s['lastChecked'] = Get-DevStoreTimestamp
-                }
-                if ($s['status'] -eq 'error') { $errors++ }
-                $newApps[$repo] = $s
-            }
-        }
-        else {
-            $newApps = $oldApps
-        }
-
-        try { [void](Update-DevStoreAgentFiles -Root $Root) } catch { Write-DevStoreLog -Root $Root -Message "self-update: $($_.Exception.Message)" }
-        $state['apps'] = $newApps
-        $state['accounts'] = @($tokens | ForEach-Object { $_['login'] } | Where-Object { $_ })   # names only, never tokens
-        $state['lastRun'] = Get-DevStoreTimestamp
-        if ($runError) { $state['lastRunResult'] = "failed: $runError" }
-        elseif ($errors -gt 0) { $state['lastRunResult'] = "$errors error(s)" }
-        else { $state['lastRunResult'] = 'ok' }
-        Write-DevStoreJson -Path $statePath -Object $state
-        if ($runError) { Write-DevStoreLog -Root $Root -Message "run failed: $runError" }
+        $passes = 0
+        do {
+            $passes++
+            Write-DevStoreProgress -Root $Root -Text 'Looking for updates'
+            Invoke-DevStoreUpdaterPass -Root $Root
+            $waiting = @(Get-ChildItem -LiteralPath (Join-DevStorePath $Root 'requests') -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+        } while ($waiting -gt 0 -and $passes -lt 3)
     }
     finally {
+        Clear-DevStoreProgress -Root $Root
         $mutex.ReleaseMutex()
         $mutex.Dispose()
     }
@@ -853,4 +901,4 @@ Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-D
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, Test-DevStoreOldProcessRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,
-    Invoke-DevStoreUpdaterRun
+    Invoke-DevStoreUpdaterRun, Invoke-DevStoreUpdaterPass, Write-DevStoreProgress, Clear-DevStoreProgress

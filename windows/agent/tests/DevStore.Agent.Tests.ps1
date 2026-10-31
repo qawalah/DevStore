@@ -652,3 +652,45 @@ Describe 'Catalog lists pull request test builds' {
         $app.previews[0].version | Should -Be '1.1.0-pr7.3'
     }
 }
+
+Describe 'Update checks requested during a run' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'requests') -Force | Out-Null
+        $script:Passes = 0
+        $script:SawProgress = $false
+    }
+
+    It 'runs another pass right away when a Check request arrived meanwhile' {
+        Mock -ModuleName DevStore.Agent Invoke-DevStoreUpdaterPass {
+            param($Root)
+            $script:Passes++
+            $script:SawProgress = Test-Path (Join-Path $Root 'progress.json')
+            Get-ChildItem (Join-Path $Root 'requests') -File | Remove-Item
+            if ($script:Passes -eq 1) { '{"action":"check"}' | Set-Content (Join-Path $Root 'requests/late.json') }
+        }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        $script:Passes | Should -Be 2
+        $script:SawProgress | Should -BeTrue
+        Test-Path (Join-Path $Root 'progress.json') | Should -BeFalse
+    }
+
+    It 'stops after three passes even if requests keep coming' {
+        Mock -ModuleName DevStore.Agent Invoke-DevStoreUpdaterPass {
+            param($Root)
+            $script:Passes++
+            '{"action":"check"}' | Set-Content (Join-Path $Root "requests/r$($script:Passes).json")
+        }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        $script:Passes | Should -Be 3
+    }
+
+    It 'writes what it is doing to progress.json' {
+        Write-DevStoreProgress -Root $Root -Text 'Downloading SimDeck Companion 1.4.1'
+        $p = Read-DevStoreJson -Path (Join-Path $Root 'progress.json') -Default @{}
+        $p.text | Should -Be 'Downloading SimDeck Companion 1.4.1'
+        $p.started | Should -Not -BeNullOrEmpty
+        Clear-DevStoreProgress -Root $Root
+        Test-Path (Join-Path $Root 'progress.json') | Should -BeFalse
+    }
+}

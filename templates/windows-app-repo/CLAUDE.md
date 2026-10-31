@@ -3,7 +3,7 @@
 This app is released through DevStore. Pushing to `main` builds it on GitHub:
 Python with PyInstaller, Go with `go build`, C# with `dotnet publish`. A new
 `version` in `devstore.json` publishes a GitHub Release, which the DevStore
-Updater on the user's Windows PC installs within about 10 minutes.
+Updater on the user's Windows PC installs within about 5 minutes.
 
 ## devstore.json
 - `name`: lowercase letters, digits and dashes. **Never change it.** It's the

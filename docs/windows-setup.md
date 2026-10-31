@@ -33,7 +33,7 @@ Either way, the installer:
 - stores the token encrypted for this PC,
 - downloads WinSW (the tool that runs your background apps as real Windows
   services),
-- registers the **DevStore Updater** task (runs at startup and every 10
+- registers the **DevStore Updater** task (runs at startup and every 5
   minutes),
 - adds the **DevStore Manager** app.
 
@@ -43,14 +43,14 @@ Within a few minutes, **DevStore Manager** appears in the Start menu under
 ## 3. Install your apps
 Open **DevStore** from the Start menu.
 - **Discover** lists every repo in your GitHub that has a Windows release.
-  You don't need to add them one by one. New apps appear within 10 minutes
+  You don't need to add them one by one. New apps appear within 5 minutes
   of their first release.
 - Click an app to see its description, screenshots and activity. Click
   **Install**. No admin prompt is needed, and it's ready within a minute.
 - **Installed** shows what's on this PC. Anything that needs your attention
   is listed first, in plain words.
-- **Check for updates** checks right away instead of waiting up to 10
-  minutes.
+- **Check for updates** checks right away instead of waiting up to 5
+  minutes. While a check runs, the sidebar shows what it's doing.
 
 To give an app an icon, description and screenshots in the store, add them
 to its `devstore.json` (see the app repo's `CLAUDE.md`), or just put PNGs in
@@ -88,7 +88,7 @@ so:
    only that repo, **Contents: Read-only**. They send it to you privately.
 2. Run `DevStoreSetup.exe`, paste their token, and tick **Add as another
    GitHub account**.
-3. Within 10 minutes their apps appear under **Shared**. **Settings → GitHub
+3. Within 5 minutes their apps appear under **Shared**. **Settings → GitHub
    accounts** lists every account DevStore uses.
 
 ### Where things are

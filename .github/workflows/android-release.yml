@@ -54,6 +54,9 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
+      # Caches Gradle and dependencies between builds (much faster rebuilds).
+      - uses: gradle/actions/setup-gradle@v4
+
       - name: Check Android SDK
         run: |
           # GitHub's ubuntu runners ship the Android SDK; AGP downloads any missing platform.
