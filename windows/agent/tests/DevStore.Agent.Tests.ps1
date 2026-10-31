@@ -736,3 +736,89 @@ Describe 'Update-DevStoreStarred' {
         $st.error | Should -Match '500'
     }
 }
+
+Describe 'NAS status (Watchtower)' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'requests') -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Write-DevStoreNasToken {}
+        $script:Cache = @{
+            'qawalah/werd' = @([pscustomobject]@{ tag_name = 'docker-v1.8.0'; draft = $false; prerelease = $false; assets = @()
+                    published_at = '2026-10-31T10:00:00Z'; body = 'Image `ghcr.io/qawalah/werd-server:1.8.0` (also `latest`).' })
+            'qawalah/tool' = @([pscustomobject]@{ tag_name = 'windows-v1.0.0'; draft = $false; prerelease = $false; assets = @() })
+        }
+    }
+
+    It 'set-nas saves the address and hands the token to the encrypted store' {
+        '{"action":"set-nas","url":"http://192.168.1.20:8081","token":"s3cret"}' | Set-Content (P $Root 'requests' '1.json')
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @() }
+        $result.config.nas.watchtower | Should -Be 'http://192.168.1.20:8081'
+        Should -Invoke -ModuleName DevStore.Agent Write-DevStoreNasToken -Times 1 -ParameterFilter { $Token -eq 's3cret' }
+        @(Get-ChildItem (Join-Path $Root 'requests')).Count | Should -Be 0
+    }
+
+    It 'set-nas with an empty address turns NAS status off and forgets the token' {
+        '{"action":"set-nas","url":"","token":""}' | Set-Content (P $Root 'requests' '1.json')
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @(); nas = @{ watchtower = 'http://nas:8081' } }
+        $result.config.ContainsKey('nas') | Should -BeFalse
+        Should -Invoke -ModuleName DevStore.Agent Write-DevStoreNasToken -Times 1 -ParameterFilter { -not $Token }
+    }
+
+    It 'set-nas with an empty token keeps the stored one' {
+        '{"action":"set-nas","url":"http://nas:8082","token":""}' | Set-Content (P $Root 'requests' '1.json')
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @() }
+        $result.config.nas.watchtower | Should -Be 'http://nas:8082'
+        Should -Invoke -ModuleName DevStore.Agent Write-DevStoreNasToken -Times 0
+    }
+
+    It 'lists newest Docker versions without asking Watchtower when NAS status is off' {
+        Mock -ModuleName DevStore.Agent Get-DevStoreWatchtower { throw 'should not be called' }
+        $nas = Get-DevStoreNasState -Root $Root -Config @{ apps = @() } -ReleaseCache $Cache
+        $nas.url | Should -BeNullOrEmpty
+        @($nas.apps.Keys) | Should -Be @('qawalah/werd')
+        $nas.apps['qawalah/werd'].latest | Should -Be '1.8.0'
+        $nas.apps['qawalah/werd'].status | Should -Be 'unknown'
+    }
+
+    It 'reports what the NAS runs from Watchtower' {
+        Mock -ModuleName DevStore.Agent Read-DevStoreNasToken { 's3cret' }
+        Mock -ModuleName DevStore.Agent Get-DevStoreWatchtower {
+            @{ lastScan = '2026-10-31T10:05:00Z'; failed = 0
+                containers = @([pscustomobject]@{ name = 'werd-server'; image = 'ghcr.io/qawalah/werd-server:latest'; running = $true; stale = $false }) }
+        }
+        $nas = Get-DevStoreNasState -Root $Root -Config @{ nas = @{ watchtower = 'http://nas:8081' } } -ReleaseCache $Cache
+        $nas.error | Should -BeNullOrEmpty
+        $nas.lastScan | Should -Be '2026-10-31T10:05:00Z'
+        $nas.apps['qawalah/werd'].status | Should -Be 'ok'
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreWatchtower -Times 1 -ParameterFilter { $Url -eq 'http://nas:8081' -and $Token -eq 's3cret' }
+    }
+
+    It 'keeps the newest versions and says why when Watchtower cannot be reached' {
+        Mock -ModuleName DevStore.Agent Read-DevStoreNasToken { 's3cret' }
+        Mock -ModuleName DevStore.Agent Get-DevStoreWatchtower { throw "Can't reach Watchtower at http://nas:8081: timed out" }
+        $nas = Get-DevStoreNasState -Root $Root -Config @{ nas = @{ watchtower = 'http://nas:8081' } } -ReleaseCache $Cache
+        $nas.error | Should -Match "Can't reach Watchtower"
+        $nas.apps['qawalah/werd'].latest | Should -Be '1.8.0'
+        $nas.apps['qawalah/werd'].status | Should -Be 'unknown'
+    }
+
+    It 'asks for a token when none is saved' {
+        Mock -ModuleName DevStore.Agent Read-DevStoreNasToken { $null }
+        Mock -ModuleName DevStore.Agent Get-DevStoreWatchtower { throw 'should not be called' }
+        $nas = Get-DevStoreNasState -Root $Root -Config @{ nas = @{ watchtower = 'http://nas:8081' } } -ReleaseCache $Cache
+        $nas.error | Should -Match 'token'
+    }
+
+    It 'calls Watchtower with the token and normalises its times' {
+        Mock -ModuleName DevStore.Agent Invoke-RestMethod {
+            if ($Uri -like '*/v1/containers/details') { return [pscustomobject]@{ containers = @([pscustomobject]@{ name = 'w'; image = 'x'; running = $true; stale = $false }) } }
+            return [pscustomobject]@{ timestamp = [datetime]::new(2026, 10, 31, 10, 5, 0, [DateTimeKind]::Utc); summary = [pscustomobject]@{ failed = 2 } }
+        }
+        $w = Get-DevStoreWatchtower -Url 'http://nas:8081/' -Token 's3cret'
+        $w.lastScan | Should -Be '2026-10-31T10:05:00Z'
+        $w.failed | Should -Be 2
+        @($w.containers).Count | Should -Be 1
+        Should -Invoke -ModuleName DevStore.Agent Invoke-RestMethod -Times 1 -ParameterFilter {
+            $Uri -eq 'http://nas:8081/v1/containers/details' -and $Headers.Authorization -eq 'Bearer s3cret' -and $TimeoutSec -eq 10 }
+    }
+}

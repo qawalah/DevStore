@@ -602,6 +602,83 @@ function Remove-DevStoreAppCore {
     $State['apps'].Remove($key)
 }
 
+# ---------------------------------------------------------------- NAS (Watchtower)
+
+function Write-DevStoreNasToken {
+    # Watchtower's API token, encrypted for this PC in nas.dat, readable only by SYSTEM
+    # and Administrators. An empty token deletes it.
+    param([string]$Root, [string]$Token)
+    $file = Join-DevStorePath $Root 'nas.dat'
+    if (-not $Token) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; return }
+    Add-Type -AssemblyName System.Security
+    $enc = [System.Security.Cryptography.ProtectedData]::Protect([System.Text.Encoding]::UTF8.GetBytes($Token), $null, 'LocalMachine')
+    Set-Content -LiteralPath $file -Value ([Convert]::ToBase64String($enc)) -Encoding ascii
+    & icacls.exe $file /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' /Q | Out-Null
+}
+
+function Read-DevStoreNasToken {
+    param([string]$Root)
+    $file = Join-DevStorePath $Root 'nas.dat'
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    Add-Type -AssemblyName System.Security
+    $bytes = [Convert]::FromBase64String((Get-Content -LiteralPath $file -Raw).Trim())
+    return [System.Text.Encoding]::UTF8.GetString([System.Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, 'LocalMachine'))
+}
+
+function Get-DevStoreWatchtower {
+    # Watchtower's read-only API: the containers it watches and its last scan.
+    param([string]$Url, [string]$Token)
+    $base = $Url.TrimEnd('/')
+    $headers = @{ Authorization = "Bearer $Token"; 'User-Agent' = $script:UserAgent }
+    try {
+        $details = Invoke-RestMethod -Uri "$base/v1/containers/details" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 10
+        $status = Invoke-RestMethod -Uri "$base/v1/status" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 10
+    }
+    catch {
+        $code = $null
+        if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+        if ($code -eq 401 -or $code -eq 403) { throw "Watchtower rejected the token (HTTP $code)." }
+        if ($code -eq 404) { throw "Watchtower's API isn't turned on at $base (HTTP 404). Add WATCHTOWER_HTTP_API_ENDPOINTS=containers,metrics." }
+        throw "Can't reach Watchtower at ${base}: $($_.Exception.Message)"
+    }
+    $failed = 0
+    if ($status.summary -and $null -ne $status.summary.failed) { $failed = [int]$status.summary.failed }
+    return @{ containers = @($details.containers); lastScan = (ConvertTo-DevStoreUtcText $status.timestamp); failed = $failed }
+}
+
+function Get-DevStoreNasState {
+    # state.nas: the newest Docker version of each repo (from the releases the catalog
+    # already read) and, when Watchtower is set up, what the NAS runs.
+    param([string]$Root, [hashtable]$Config, [hashtable]$ReleaseCache)
+    $docker = @{}
+    foreach ($repo in @($ReleaseCache.Keys)) {
+        $d = Get-DevStoreDockerRelease -Releases $ReleaseCache[$repo]
+        if ($d) { $docker[$repo] = $d }
+    }
+    $url = $null
+    if ($Config.ContainsKey('nas') -and $Config['nas'] -is [hashtable]) { $url = [string]$Config['nas']['watchtower'] }
+    $apps = @{}
+    foreach ($repo in @($docker.Keys)) {
+        $apps[$repo] = @{ name = $docker[$repo]['name']; latest = $docker[$repo]['version']; publishedAt = $docker[$repo]['publishedAt']
+            container = $null; status = 'unknown' }
+    }
+    $nas = @{ url = $url; checked = Get-DevStoreTimestamp; lastScan = $null; failed = 0; error = $null; apps = $apps }
+    if (-not $url) { return $nas }
+    try {
+        $token = Read-DevStoreNasToken -Root $Root
+        if (-not $token) { throw 'No Watchtower token is saved. Enter it in Settings > NAS.' }
+        $w = Get-DevStoreWatchtower -Url $url -Token $token
+        $nas['lastScan'] = $w['lastScan']
+        $nas['failed'] = $w['failed']
+        $nas['apps'] = Get-DevStoreNasApps -Docker $docker -Containers $w['containers'] -LastScan $w['lastScan']
+    }
+    catch {
+        $nas['error'] = $_.Exception.Message
+        Write-DevStoreLog -Root $Root -Message "NAS status: $($_.Exception.Message)"
+    }
+    return $nas
+}
+
 function Invoke-DevStoreRequests {
     # Applies install/remove/check requests the Manager dropped in <Root>\requests.
     param([string]$Root, [hashtable]$Config, [hashtable]$State = @{ apps = @{} })
@@ -629,6 +706,17 @@ function Invoke-DevStoreRequests {
                     $Config = Set-DevStoreConfigChannel -Config $Config -Repo $req['repo'] -Channel $req['channel']
                     $apply += $req['repo']
                     Write-DevStoreLog -Root $Root -App $req['repo'] -Message "now following $($req['channel'] -replace '^pr-', 'test builds of PR #')"
+                }
+                'set-nas' {
+                    $Config = Set-DevStoreConfigNas -Config $Config -Url $req['url']
+                    if (-not $req['url']) {
+                        Write-DevStoreNasToken -Root $Root -Token ''
+                        Write-DevStoreLog -Root $Root -Message 'NAS status turned off'
+                    }
+                    else {
+                        if ($req['token']) { Write-DevStoreNasToken -Root $Root -Token $req['token'] }
+                        Write-DevStoreLog -Root $Root -Message "NAS status: Watchtower at $($req['url'])"
+                    }
                 }
                 'set-updates' {
                     $Config = Set-DevStoreConfigUpdates -Config $Config -Repo $req['repo'] -Mode $req['mode']
@@ -912,6 +1000,11 @@ function Invoke-DevStoreUpdaterPass {
         $newApps = $oldApps
     }
 
+    # Docker apps on the NAS. Never stops the pass: the NAS may be off or away.
+    if ($token) {
+        try { $state['nas'] = Get-DevStoreNasState -Root $Root -Config $config -ReleaseCache $releaseCache }
+        catch { Write-DevStoreLog -Root $Root -Message "NAS status: $($_.Exception.Message)" }
+    }
     try { [void](Update-DevStoreAgentFiles -Root $Root) } catch { Write-DevStoreLog -Root $Root -Message "self-update: $($_.Exception.Message)" }
     $state['apps'] = $newApps
     $state['accounts'] = @($tokens | ForEach-Object { $_['login'] } | Where-Object { $_ })   # names only, never tokens
@@ -948,7 +1041,8 @@ function Invoke-DevStoreUpdaterRun {
     }
 }
 
-Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
+Export-ModuleMember -Function Write-DevStoreNasToken, Read-DevStoreNasToken, Get-DevStoreWatchtower, Get-DevStoreNasState,
+    Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
     Read-DevStoreTokens, Write-DevStoreTokens,
     Remove-DevStoreAppCore, Get-DevStoreStarredRepos, Update-DevStoreStarred, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
