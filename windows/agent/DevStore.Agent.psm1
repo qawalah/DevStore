@@ -528,6 +528,57 @@ function Get-DevStoreAccessibleRepos {
     return $all.ToArray()
 }
 
+function Get-DevStoreStarredRepos {
+    # Public repos the account has starred (up to 300). Public stars need no extra
+    # token permission; without a known login, falls back to /user/starred.
+    param([string]$Login, [string]$Token)
+    Initialize-DevStoreHttp
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = $script:UserAgent }
+    $base = 'https://api.github.com/user/starred'
+    if ($Login) { $base = "https://api.github.com/users/$([uri]::EscapeDataString($Login))/starred" }
+    $all = New-Object System.Collections.ArrayList
+    for ($page = 1; $page -le 3; $page++) {
+        $resp = Invoke-RestMethod -Uri "$base`?per_page=100&page=$page" -Headers $headers -Method Get -UseBasicParsing
+        $count = 0
+        foreach ($r in $resp) { [void]$all.Add($r); $count++ }
+        if ($count -lt 100) { break }
+    }
+    return $all.ToArray()
+}
+
+function Update-DevStoreStarred {
+    # Watch only: writes starred.json (each starred repo's newest release, notes
+    # and links) for the window. Never downloads or runs anything from them.
+    param([string]$Root, $Tokens, [switch]$Force)
+    $path = Join-DevStorePath $Root 'starred.json'
+    $old = Read-DevStoreJson -Path $path -Default @{}
+    if (-not (Test-DevStoreStarredDue -Last ([string]$old['updated']) -Force:$Force)) { return }
+    $Tokens = @($Tokens)
+    $main = $Tokens[0]
+    $logins = @($Tokens | ForEach-Object { $_['login'] } | Where-Object { $_ })
+    try {
+        $login = $main['login']
+        if (-not $login) { try { $login = Get-DevStoreLogin -Token $main['token'] } catch { $login = $null } }
+        $repos = @()
+        foreach ($r in @(Get-DevStoreStarredRepos -Login $login -Token $main['token'])) {
+            $owner = ([string]$r.full_name -split '/')[0]
+            if (@($logins | Where-Object { $_ -ieq $owner }).Count) { continue }   # your own apps are already in DevStore
+            Write-DevStoreProgress -Root $Root -Text "Looking at starred $($r.full_name)"
+            $releases = @()
+            try { $releases = @(Get-DevStoreReleases -Repo ([string]$r.full_name) -Token $main['token']) }
+            catch { Write-DevStoreLog -Root $Root -App ([string]$r.full_name) -Message "starred: couldn't read releases: $($_.Exception.Message)" }
+            $repos += ConvertTo-DevStoreStarredEntry -Repo $r -Releases $releases
+        }
+        Write-DevStoreJson -Path $path -Object @{ updated = Get-DevStoreTimestamp; error = $null; repos = $repos }
+    }
+    catch {
+        $keep = @()
+        if ($old.ContainsKey('repos')) { $keep = @($old['repos']) }
+        Write-DevStoreJson -Path $path -Object @{ updated = Get-DevStoreTimestamp; error = $_.Exception.Message; repos = $keep }
+        Write-DevStoreLog -Root $Root -Message "couldn't read your starred repos: $($_.Exception.Message)"
+    }
+}
+
 function Remove-DevStoreAppCore {
     # Uninstalls an app's service, shortcut and program files and drops its state.
     # Data in %ProgramData%\<name> is kept.
@@ -821,6 +872,8 @@ function Invoke-DevStoreUpdaterPass {
             $state['catalogError'] = $_.Exception.Message
             Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
         }
+        try { Update-DevStoreStarred -Root $Root -Tokens $tokens -Force:([bool]$requests['check']) }
+        catch { Write-DevStoreLog -Root $Root -Message "starred: $($_.Exception.Message)" }
         foreach ($entry in @($config['apps'])) {
             if ($null -eq $entry -or -not $entry['repo']) { continue }
             $repo = [string]$entry['repo']
@@ -897,7 +950,7 @@ function Invoke-DevStoreUpdaterRun {
 
 Export-ModuleMember -Function Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
     Read-DevStoreTokens, Write-DevStoreTokens,
-    Remove-DevStoreAppCore, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
+    Remove-DevStoreAppCore, Get-DevStoreStarredRepos, Update-DevStoreStarred, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, Test-DevStoreOldProcessRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,

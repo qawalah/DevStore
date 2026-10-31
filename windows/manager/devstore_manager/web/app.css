@@ -167,6 +167,9 @@ code { font: 12.5px var(--mono); background: var(--surface-2); padding: 1px 5px;
 
 .select { height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; min-width: 240px; max-width: 100%; }
 .select:focus { outline: none; border-color: var(--accent); }
+.chip-new { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+.watch-note { font-size: 12.5px; margin: 0 0 12px; }
+.log.notes { max-height: 360px; font: 13px/1.55 var(--font); color: var(--text); white-space: pre-wrap; }
 .hint { font-size: 12.5px; margin: 6px 0 0; }
 .field-label { display: block; margin: 16px 0 6px; font-weight: 600; font-size: 13px; }
 .settings { max-width: 720px; }

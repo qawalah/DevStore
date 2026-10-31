@@ -105,7 +105,7 @@ function emptyHtml(title, body) {
 
 function render() {
   document.querySelectorAll(".nav-item").forEach((b) => {
-    const on = b.dataset.view === route.name || (route.name === "app" && b.dataset.view === route.from);
+    const on = b.dataset.view === route.name || (["app", "star"].includes(route.name) && b.dataset.view === route.from);
     if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   const v = $("#view");
@@ -119,13 +119,16 @@ function render() {
   renderUpdater(view.updater);
   $("#count-installed").textContent = view.counts.installed || "";
   $("#count-shared").textContent = view.counts.shared || "";
+  $("#count-starred").textContent = view.counts.starredNew ? `${view.counts.starredNew} new` : "";
   renderBanner();
-  $(".search").hidden = ["app", "activity", "settings"].includes(route.name);
-  $(".topbar").hidden = route.name === "app";
+  $(".search").hidden = ["app", "activity", "settings", "star"].includes(route.name);
+  $(".topbar").hidden = route.name === "app" || route.name === "star";
   if (route.name === "discover") renderDiscover(v);
   else if (route.name === "installed") renderInstalled(v);
   else if (route.name === "shared") renderShared(v);
   else if (route.name === "settings") renderSettings(v);
+  else if (route.name === "starred") renderStarred(v);
+  else if (route.name === "star") renderStar(v);
   else if (route.name === "activity") renderActivity(v);
   else if (route.name === "app") renderApp(v);
 }
@@ -142,7 +145,7 @@ function renderUpdater(u) {
 
 function renderBanner() {
   const b = $("#banner");
-  const p = route.name === "app" ? [] : view.problems;
+  const p = ["app", "star", "starred"].includes(route.name) ? [] : view.problems;
   if (!p.length) { b.hidden = true; return; }
   const first = p[0];
   const more = p.length > 1 ? ` <span class="muted">and ${p.length - 1} more</span>` : "";
@@ -247,6 +250,66 @@ function renderSettings(v) {
     toast(res.message, res.ok);
     load();
   });
+}
+
+// ---------------------------------------------------------------- starred (watch only)
+
+function ago(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.floor((Date.now() - d) / 86400000);
+  return days < 1 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : d.toLocaleDateString();
+}
+
+function starIcon(item, size = "sm") {
+  return item.avatar ? `<div class="icon ${size}"><img src="${esc(item.avatar)}" alt=""></div>`
+    : iconHtml({ name: item.repo, displayName: item.repo.split("/")[1] }, size);
+}
+
+async function renderStarred(v) {
+  $("#view-title").textContent = "Starred";
+  const st = await api().get_starred();
+  if (route.name !== "starred") return;
+  const items = st.items.filter((i) => !search || [i.repo, i.description].some((x) => String(x || "").toLowerCase().includes(search.toLowerCase())));
+  const note = `<p class="muted watch-note">DevStore only watches these for new versions. It never downloads or runs them; downloads open in your browser.</p>`;
+  if (!st.items.length) {
+    v.innerHTML = emptyHtml(st.error ? "Couldn't read your stars" : "No starred repos yet",
+      st.error ? esc(st.error) : "Star a repo on GitHub and it shows up here within an hour (or press Check for updates).");
+    return;
+  }
+  if (!items.length) { v.innerHTML = emptyHtml("No matches", `Nothing matches “${esc(search)}”.`); return; }
+  v.innerHTML = note + `<div class="rows">${items.map((i) => `
+    <div class="row" data-star="${esc(i.repo)}" tabindex="0">
+      ${starIcon(i)}
+      <div style="min-width:0"><div class="row-name">${esc(i.repo)} ${i.isNew ? '<span class="chip chip-new">New</span>' : ""}</div>
+        <div class="row-sub">${i.latest ? `${esc(i.latest.title)} · ${esc(ago(i.latest.publishedAt))}` : "No releases"}${i.description ? ` · ${esc(i.description)}` : ""}</div></div>
+      <div>${i.latest ? `<button class="btn btn-quiet" data-star="${esc(i.repo)}">${ICONS.open}<span>Release</span></button>` : ""}</div>
+    </div>`).join("")}</div>`;
+}
+
+async function renderStar(v) {
+  const st = await api().get_starred();
+  const i = st.items.find((x) => x.repo === route.repo);
+  if (!i) { go("starred"); return; }
+  if (i.isNew) api().mark_seen(i.repo);
+  const r = i.latest;
+  const size = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  v.innerHTML = `
+    <button class="link detail-back" data-nav="starred">${ICONS.back}<span>Back</span></button>
+    <div class="detail-head">${starIcon(i, "lg")}
+      <div><h1 class="detail-title">${esc(i.repo)}</h1><div class="detail-sub">${esc(i.description || "")}</div></div>
+      <div class="detail-actions"><button class="btn btn-quiet" data-link="${esc(i.url)}">${ICONS.open}<span>Open on GitHub</span></button></div>
+    </div>
+    ${r ? `<h2>${esc(r.title)} <span class="muted">· ${esc(r.tag)} · ${esc(ago(r.publishedAt))}</span></h2>
+      <div class="log notes">${esc(r.notes || "No release notes.")}</div>
+      <h2>Files</h2>
+      ${r.assets.length ? `<div class="rows">${r.assets.map((a) => `<div class="row" style="cursor:default">
+          <span></span><div><div class="row-name">${esc(a.name)}</div><div class="row-sub">${size(a.size)}</div></div>
+          <button class="btn btn-quiet" data-link="${esc(a.url)}">${ICONS.download}<span>Download in browser</span></button></div>`).join("")}</div>`
+        : `<p class="muted">No files attached. <button class="link" data-link="${esc(r.url)}">See the release on GitHub</button>.</p>`}
+      <p class="muted watch-note">DevStore doesn't install starred apps. Downloads open in your browser, so you decide what to run.</p>`
+      : `<p class="muted">This repo has no releases yet.</p>`}`;
 }
 
 function renderInstalled(v) {
@@ -361,6 +424,10 @@ async function runAction(btn) {
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (btn) { e.stopPropagation(); runAction(btn); return; }
+  const link = e.target.closest("[data-link]");
+  if (link) { e.stopPropagation(); api().open_link(link.dataset.link).then((r) => toast(r.message, r.ok)); return; }
+  const star = e.target.closest("[data-star]");
+  if (star) { route = { name: "star", repo: star.dataset.star, from: "starred" }; render(); return; }
   const open = e.target.closest("[data-open]");
   if (open) { api().open_location(open.dataset.open).then((r) => toast(r.message, r.ok)); return; }
   const nav = e.target.closest("[data-nav]");
@@ -372,6 +439,7 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && route.name === "app") go(route.from || "discover");
+  if (e.key === "Escape" && route.name === "star") go("starred");
   if (e.key === "Enter" && e.target.matches("[data-goto]")) go("app", e.target.dataset.goto);
 });
 document.addEventListener("submit", async (e) => {

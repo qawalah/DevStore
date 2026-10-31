@@ -360,10 +360,62 @@ function Select-DevStoreRepoStoreFiles {
     return @{ icon = $icon; screenshots = @($shots | Select-Object -First 6) }
 }
 
+function Test-DevStoreStarredDue {
+    # Starred repos are re-read at most hourly (they change rarely and may be many),
+    # or right away when the user clicked Check for updates.
+    param([string]$Last, [datetime]$Now = (Get-Date).ToUniversalTime(), [switch]$Force)
+    if ($Force -or -not $Last) { return $true }
+    try {
+        $t = [datetime]::Parse($Last, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+    }
+    catch { return $true }
+    return (($Now.ToUniversalTime() - $t).TotalMinutes -ge 60)
+}
+
+function Get-DevStoreGitHubUrl {
+    # Only https://github.com/... links (and GitHub's avatar host) are kept: the
+    # window opens them in the browser, so nothing else may get through.
+    param([string]$Url, [string]$Fallback, [string]$Domain = 'github.com')
+    if ($Url -and $Url -match "^https://$([regex]::Escape($Domain))/") { return $Url }
+    return $Fallback
+}
+
+function ConvertTo-DevStoreStarredEntry {
+    # A starred repo and its newest stable release, as plain data for the window.
+    # Watch only: nothing here is ever downloaded or run by DevStore.
+    param($Repo, $Releases)
+    $name = [string]$Repo.full_name
+    $repoUrl = Get-DevStoreGitHubUrl -Url ([string]$Repo.html_url) -Fallback "https://github.com/$name"
+    $avatar = $null
+    if ($Repo.PSObject.Properties['owner'] -and $Repo.owner) {
+        $avatar = Get-DevStoreGitHubUrl -Url ([string]$Repo.owner.avatar_url) -Fallback $null -Domain 'avatars.githubusercontent.com'
+    }
+    $flat = foreach ($x in @($Releases)) { if ($x -is [System.Array]) { foreach ($y in $x) { $y } } else { $x } }
+    $rel = @($flat | Where-Object { $_ -and -not $_.draft -and -not $_.prerelease }) | Select-Object -First 1
+    $latest = $null
+    if ($rel) {
+        $notes = [string]$rel.body
+        if ($notes.Length -gt 4000) { $notes = $notes.Substring(0, 3990) + ' …' }
+        $assets = @(@($rel.assets) | Where-Object { $_ } | ForEach-Object {
+                $u = Get-DevStoreGitHubUrl -Url ([string]$_.browser_download_url) -Fallback $null
+                if ($u) { @{ name = [string]$_.name; size = [long]$_.size; url = $u } }
+            } | Select-Object -First 20)
+        $title = [string]$rel.name
+        if (-not $title) { $title = [string]$rel.tag_name }
+        $latest = @{
+            tag = [string]$rel.tag_name; title = $title; publishedAt = [string]$rel.published_at; notes = $notes
+            url = (Get-DevStoreGitHubUrl -Url ([string]$rel.html_url) -Fallback "$repoUrl/releases"); assets = $assets
+        }
+    }
+    return @{ repo = $name; description = [string]$Repo.description; url = $repoUrl; avatar = $avatar; latest = $latest }
+}
+
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
     ConvertFrom-DevStoreRequest, Select-DevStoreStoreAssets, Get-DevStoreUpdateMode, Set-DevStoreConfigUpdates,
     ConvertFrom-DevStoreTokenText, ConvertTo-DevStoreTokenText, Set-DevStoreTokenEntry, Select-DevStoreRepoStoreFiles,
     ConvertFrom-DevStorePrTag, Get-DevStorePrBuilds, Select-DevStoreChannelRelease, Get-DevStoreReleaseVersion,
-    Get-DevStoreChannel, Set-DevStoreConfigChannel
+    Get-DevStoreChannel, Set-DevStoreConfigChannel, Test-DevStoreStarredDue, Get-DevStoreGitHubUrl,
+    ConvertTo-DevStoreStarredEntry

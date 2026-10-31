@@ -91,6 +91,15 @@ so:
 3. Within 5 minutes their apps appear under **Shared**. **Settings → GitHub
    accounts** lists every account DevStore uses.
 
+### Starred repos (watch only)
+**Starred** lists the public repos you've starred on GitHub (other than your
+own), with each one's latest release and its notes. A **New** badge marks a
+version released since you last looked. DevStore checks your stars about
+once an hour, or right away when you press **Check for updates**.
+
+DevStore **never downloads or installs** starred apps. **Download in browser**
+opens the file's GitHub link in your browser, so you decide what to run.
+
 ### Where things are
 **Settings → Where things are** opens these folders:
 - Programs: `C:\DevStore\apps\<app name>\` (DevStore keeps the current and

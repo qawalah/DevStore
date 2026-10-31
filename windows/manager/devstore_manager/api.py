@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import json
 import os
 import threading
 from pathlib import Path
 from typing import Optional
 
-from . import actions, files, store
+from . import actions, files, starred, store
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
@@ -54,6 +55,7 @@ class Api:
                                 progress=files.load_json(root / "progress.json", {}))
         for a in view["apps"]:
             a["iconData"] = self._image(a.get("icon"))
+        view["counts"]["starredNew"] = starred.build(files.load_json(root / "starred.json", {}), self._seen())[0]["newCount"]
         view["settings"]["locations"] = self._locations()
         view["settings"]["version"] = app_version()
         self._view = view
@@ -74,6 +76,47 @@ class Api:
     def _find(self, repo: str) -> Optional[dict]:
         apps = self._view.get("apps") or self.get_view().get("apps", [])
         return next((a for a in apps if a["repo"].lower() == str(repo).lower()), None)
+
+    # ------------------------------------------------------------ starred (watch only)
+
+    @staticmethod
+    def _seen_path() -> Path:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "DevStore" / "starred-seen.json"
+
+    def _seen(self) -> dict:
+        return files.load_json(self._seen_path(), {})
+
+    def _save_seen(self, seen: dict) -> None:
+        try:
+            path = self._seen_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(seen), encoding="utf-8")
+        except OSError:
+            pass
+
+    def get_starred(self) -> dict:
+        data = files.load_json(actions.ROOT / "starred.json", {})
+        old = self._seen()
+        view, seen = starred.build(data, old)
+        if seen != old:
+            self._save_seen(seen)
+        return view
+
+    def mark_seen(self, repo: str) -> dict:
+        data = files.load_json(actions.ROOT / "starred.json", {})
+        item = next((r for r in data.get("repos") or [] if isinstance(r, dict) and r.get("repo") == repo), None)
+        tag = ((item or {}).get("latest") or {}).get("tag")
+        if tag:
+            self._save_seen(starred.mark_seen(self._seen(), repo, tag))
+        return {"ok": True, "message": ""}
+
+    def open_link(self, url: str) -> dict:
+        """Opens a GitHub page or download in the browser. Nothing is run by DevStore."""
+        if not starred.safe_url(url):
+            return {"ok": False, "message": "Only GitHub links can be opened."}
+        import webbrowser
+        return self._result(lambda: webbrowser.open(url), "Opened in your browser.")
 
     # ------------------------------------------------------------ doing
 

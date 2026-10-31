@@ -319,3 +319,43 @@ Describe 'Test builds from pull requests' {
         ConvertFrom-DevStoreRequest @{ action = 'set-channel'; repo = 'qawalah/a'; channel = 'pr-x; rm' } | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Starred repos (watch only)' {
+    It 'is due hourly, or right away when asked' {
+        $now = [datetime]'2026-10-31T12:00:00Z'
+        Test-DevStoreStarredDue -Last $null -Now $now | Should -BeTrue
+        Test-DevStoreStarredDue -Last '2026-10-31T11:30:00Z' -Now $now | Should -BeFalse
+        Test-DevStoreStarredDue -Last '2026-10-31T10:59:00Z' -Now $now | Should -BeTrue
+        Test-DevStoreStarredDue -Last '2026-10-31T11:59:00Z' -Now $now -Force | Should -BeTrue
+    }
+    It 'turns a repo and its newest stable release into a plain entry' {
+        $repo = [pscustomobject]@{ full_name = 'someone/tool'; description = 'A tool'; html_url = 'https://github.com/someone/tool'
+            owner = [pscustomobject]@{ avatar_url = 'https://avatars.githubusercontent.com/u/1?v=4' } }
+        $rels = @(
+            [pscustomobject]@{ tag_name = 'v2.0.0-beta'; name = 'Beta'; draft = $false; prerelease = $true; published_at = '2026-10-30T00:00:00Z'; body = 'b'; html_url = 'x'; assets = @() },
+            [pscustomobject]@{ tag_name = 'v1.9.0'; name = 'Tool 1.9'; draft = $false; prerelease = $false; published_at = '2026-10-20T00:00:00Z'
+                body = ('x' * 5000); html_url = 'https://github.com/someone/tool/releases/tag/v1.9.0'
+                assets = @([pscustomobject]@{ name = 'tool-setup.exe'; size = 1048576; browser_download_url = 'https://github.com/someone/tool/releases/download/v1.9.0/tool-setup.exe' }) })
+        $e = ConvertTo-DevStoreStarredEntry -Repo $repo -Releases $rels
+        $e.repo | Should -Be 'someone/tool'
+        $e.avatar | Should -Match '^https://avatars\.githubusercontent\.com/'
+        $e.latest.tag | Should -Be 'v1.9.0'
+        $e.latest.notes.Length | Should -BeLessOrEqual 4000
+        $e.latest.assets[0].name | Should -Be 'tool-setup.exe'
+        $e.latest.assets[0].url | Should -Match '^https://github\.com/'
+    }
+    It 'keeps repos without releases, with no latest version' {
+        $repo = [pscustomobject]@{ full_name = 'someone/lib'; description = $null; html_url = 'https://github.com/someone/lib'; owner = $null }
+        $e = ConvertTo-DevStoreStarredEntry -Repo $repo -Releases @()
+        $e.latest | Should -BeNullOrEmpty
+    }
+    It 'drops links that do not point at GitHub' {
+        $repo = [pscustomobject]@{ full_name = 'a/b'; description = ''; html_url = 'javascript:alert(1)'; owner = $null }
+        $rels = @([pscustomobject]@{ tag_name = 'v1'; name = ''; draft = $false; prerelease = $false; published_at = ''; body = ''; html_url = 'http://evil'
+                assets = @([pscustomobject]@{ name = 'x.exe'; size = 1; browser_download_url = 'https://evil.example/x.exe' }) })
+        $e = ConvertTo-DevStoreStarredEntry -Repo $repo -Releases $rels
+        $e.url | Should -Be 'https://github.com/a/b'
+        $e.latest.url | Should -Be 'https://github.com/a/b/releases'
+        @($e.latest.assets).Count | Should -Be 0
+    }
+}
