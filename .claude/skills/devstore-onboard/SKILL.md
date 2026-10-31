@@ -1,6 +1,6 @@
 ---
 name: devstore-onboard
-description: Use when the user says "onboard", "hand over", "integrate" or "add to DevStore" for an app, or uploads a *-handover.zip. Creates or sets up the app's own repo (qawalah/<app>), adds the DevStore release files, pushes to main straight away and watches the first release go green.
+description: Use when the user says "onboard", "hand over", "integrate" or "add to DevStore" for an app, or uploads a handover zip. Creates or sets up the app's own repo under qawalah, adds the DevStore release files, pushes to main straight away and watches the first release go green.
 ---
 
 # DevStore onboarding (Claude Code side)
