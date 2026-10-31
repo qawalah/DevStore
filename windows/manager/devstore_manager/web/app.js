@@ -42,6 +42,7 @@ let view = null;
 let route = { name: "discover", repo: null };
 let search = "";
 let timer = null;
+let lastPage = "";   // what the page showed last time, so refreshes only redraw on change
 const api = () => window.pywebview.api;
 
 // ---------------------------------------------------------------- loading
@@ -122,6 +123,14 @@ function render() {
   $("#count-starred").textContent = view.counts.starredNew ? `${view.counts.starredNew} new` : "";
   $("#count-nas").textContent = view.counts.nas || "";
   renderBanner();
+  // Refreshes run every few seconds: keep the page as it is while someone types in it,
+  // and when nothing it shows has changed (keeps scroll positions too).
+  const { updater, ...shown } = view;
+  const key = JSON.stringify([route, search, shown]);
+  const a = document.activeElement;
+  const typing = a && v.contains(a) && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName);
+  if (typing || key === lastPage) return;
+  lastPage = key;
   $(".search").hidden = ["app", "activity", "settings", "star", "nas"].includes(route.name);
   $(".topbar").hidden = route.name === "app" || route.name === "star";
   if (route.name === "discover") renderDiscover(v);
@@ -259,7 +268,7 @@ function renderSettings(v) {
     e.preventDefault();
     const res = await api().set_nas($("#nas-url").value, $("#nas-token").value);
     toast(res.message, res.ok);
-    if (res.ok) $("#nas-token").value = "";
+    if (res.ok) { $("#nas-token").value = ""; document.activeElement.blur(); lastPage = ""; }
     load();
   });
   const off = $("#nas-off");
@@ -426,6 +435,13 @@ async function renderApp(v) {
   if (route.name !== "app" || route.repo !== a.repo) return;
   $("#shots").innerHTML = d.screenshots.map((s) => `<img src="${s}" alt="Screenshot of ${esc(a.displayName)}">`).join("");
   $("#shots").hidden = !d.screenshots.length;
+  // A mouse wheel scrolls up and down; turn that into moving the strip sideways.
+  $("#shots").addEventListener("wheel", (e) => {
+    const el = e.currentTarget;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
+    e.preventDefault();
+    el.scrollBy({ left: e.deltaY, behavior: "auto" });
+  }, { passive: false });
   $("#app-log").textContent = d.activity.length ? d.activity.map((e) => `${e.time}  ${e.text}`).join("\n") : "No activity for this app yet.";
 }
 
