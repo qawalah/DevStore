@@ -50,6 +50,8 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 | `samples/` | Tiny apps used to test the pipelines end to end |
 | `scripts/test-docker-steps.sh` | Runs the Docker workflow's smoke-test and cleanup scripts against samples (used by the self-test) |
 | `docs/superpowers/` | Design spec and implementation plan |
+| `.claude/skills/devstore-onboard/` | Claude Code skill: `/devstore-onboard <app>` creates and sets up an app repo and pushes it |
+| `skills/devstore-handover/` | Chat skill (upload `skills/devstore-handover.zip` to claude.ai): packages a chat app for handover. Re-zip after editing |
 
 ## Versioning rule
 - **Android:** a new `versionCode` makes a release (tag
