@@ -294,6 +294,42 @@ Describe 'Update-DevStoreApp' {
         $s.installed | Should -Be '1.0.0'
     }
 
+    It 'installs a pull request test build when the app follows that PR, even in notify mode' {
+        $stable = New-FakeRelease -Name 'hello' -Version '1.2.0' -Type 'gui'
+        $pr = New-FakeRelease -Name 'hello' -Version '1.3.0-pr12.9' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($stable, $pr) }
+        $state = @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.2.0'; bad = @(); status = 'ok' }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $state -Root $Root -Token 't' -Channel 'pr-12' -Mode 'notify'
+
+        $s.installed | Should -Be '1.3.0-pr12.9'
+        $s.channel | Should -Be 'pr-12'
+        $script:Junctions[(P $Root apps hello current)] | Should -Be (P $Root apps hello versions 1.3.0-pr12.9)
+    }
+
+    It 'goes back to the stable release when switched back, even though it is a lower version' {
+        $stable = New-FakeRelease -Name 'hello' -Version '1.2.0' -Type 'gui'
+        $pr = New-FakeRelease -Name 'hello' -Version '1.3.0-pr12.9' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($stable, $pr) }
+        $state = @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.3.0-pr12.9'; bad = @(); status = 'ok' }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $state -Root $Root -Token 't' -Channel 'stable'
+
+        $s.installed | Should -Be '1.2.0'
+        $s.channel | Should -Be 'stable'
+    }
+
+    It 'notes when a followed PR has no build any more and stays on stable' {
+        $stable = New-FakeRelease -Name 'hello' -Version '1.2.0' -Type 'gui'
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases { @($stable) }
+        $state = @{ name = 'hello'; type = 'gui'; exe = 'hello.exe'; installed = '1.2.0'; bad = @(); status = 'ok' }
+
+        $s = Update-DevStoreApp -Repo 'qawalah/hello' -AppState $state -Root $Root -Token 't' -Channel 'pr-12'
+
+        $s.installed | Should -Be '1.2.0'
+        $s.channelMissing | Should -BeTrue
+    }
+
     It 'prunes versions older than current and previous' {
         foreach ($v in '0.8.0', '0.9.0', '1.0.0') {
             New-Item -ItemType Directory -Path (P $Root apps hello versions $v) -Force | Out-Null
@@ -430,6 +466,7 @@ Describe 'Update-DevStoreCatalog' {
         $app = $cat.apps['qawalah/Tool']
         $app.displayName | Should -Be 'Tool Box'
         $app.description | Should -Be 'Does tool things.'
+        @($app.previews).Count | Should -Be 0
         $app.latest | Should -Be '2.0.0'
         $app.name | Should -Be 'tool'
         Test-Path (Join-Path $Root $app.icon) | Should -BeTrue
@@ -487,6 +524,13 @@ Describe 'Invoke-DevStoreRequests' {
         @($result.apply) | Should -Be @('qawalah/a')
         $result.config.apps[0].updates | Should -Be 'notify'
         $result.config.defaultUpdates | Should -Be 'download'
+    }
+
+    It 'switches channel and applies it right away' {
+        '{"action":"set-channel","repo":"qawalah/a","channel":"pr-12"}' | Set-Content (Join-Path (Join-Path $Root 'requests') '1.json')
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @(@{ repo = 'qawalah/a' }) }
+        $result.config.apps[0].channel | Should -Be 'pr-12'
+        @($result.apply) | Should -Be @('qawalah/a')
     }
 
     It 'does nothing when there are no requests' {
@@ -580,5 +624,31 @@ Describe 'Update-DevStoreCatalog with several accounts' {
         $repoTokens['qawalah/Tool'] | Should -Be 'mine'
         $repoTokens['alialyami90/JIC'] | Should -Be 'theirs'
         $cat.account | Should -Be 'qawalah'
+    }
+}
+
+Describe 'Catalog lists pull request test builds' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Get-DevStoreAccessibleRepos { @([pscustomobject]@{ full_name = 'qawalah/Tool'; description = '' }) }
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases {
+            @([pscustomobject]@{ tag_name = 'windows-v1.0.0'; draft = $false; prerelease = $false; name = 'x'; published_at = ''
+                    assets = @([pscustomobject]@{ id = 1; name = 'tool-1.0.0-win-x64.zip' }) },
+              [pscustomobject]@{ tag_name = 'windows-v1.1.0-pr7.3'; draft = $false; prerelease = $true; name = 'PR #7: Dark mode'; published_at = ''
+                    assets = @([pscustomobject]@{ id = 2; name = 'tool-1.1.0-pr7.3-win-x64.zip' }) })
+        }
+        Mock -ModuleName DevStore.Agent Save-DevStoreAsset {}
+        Mock -ModuleName DevStore.Agent Get-DevStoreRepoTree { @() }
+    }
+
+    It 'adds the newest build of each open PR to the listing' {
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        $app = (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool']
+        $app.latest | Should -Be '1.0.0'
+        @($app.previews).Count | Should -Be 1
+        $app.previews[0].pr | Should -Be 7
+        $app.previews[0].title | Should -Be 'PR #7: Dark mode'
+        $app.previews[0].version | Should -Be '1.1.0-pr7.3'
     }
 }

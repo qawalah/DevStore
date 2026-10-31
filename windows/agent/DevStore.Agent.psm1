@@ -320,13 +320,16 @@ function Update-DevStoreApp {
     # 'ready'), 'notify' only reports them (status 'available'). -Apply installs
     # a waiting update now. A first install always happens.
     param([string]$Repo, $AppState, [string]$Root, [string]$Token, $Releases = $null,
-        [string]$Mode = 'auto', [switch]$Apply)
+        [string]$Mode = 'auto', [switch]$Apply, [string]$Channel = 'stable')
     $s = Copy-DevStoreAppState $AppState
     $s['lastChecked'] = Get-DevStoreTimestamp
     $logName = $Repo
     try {
         if ($null -eq $Releases) { $Releases = Get-DevStoreReleases -Repo $Repo -Token $Token }
-        $release = Select-DevStoreRelease -Releases $Releases -Bad $s['bad']
+        # 'stable', or 'pr-<N>' to follow a pull request's test builds.
+        $s['channel'] = $Channel
+        $release = Select-DevStoreChannelRelease -Releases $Releases -Channel $Channel -Bad $s['bad']
+        $s['channelMissing'] = [bool]($Channel -ne 'stable' -and $release -and -not (ConvertFrom-DevStorePrTag $release.tag_name))
         if ($null -eq $release) {
             if (-not $s['installed']) {
                 $s['status'] = 'error'
@@ -334,9 +337,16 @@ function Update-DevStoreApp {
             }
             return $s
         }
-        $version = (ConvertFrom-DevStoreTag $release.tag_name).ToString()
-        $s['latest'] = $version
+        $version = Get-DevStoreReleaseVersion $release
+        if (-not (ConvertFrom-DevStorePrTag $release.tag_name)) { $s['latest'] = $version }
         $action = Get-DevStoreAction -AppState $s -Version $version
+        # Switching between stable and a test build is the user's explicit choice: apply it now.
+        $installedPr = $null
+        if ([string]$s['installed'] -match '-pr(\d+)\.') { $installedPr = [int]$Matches[1] }
+        $releasePr = $null
+        $prTag = ConvertFrom-DevStorePrTag $release.tag_name
+        if ($prTag) { $releasePr = $prTag.pr }
+        if ($action -eq 'update' -and $installedPr -ne $releasePr) { $Apply = $true }
         if ($action -eq 'none') {
             if ($s['status'] -ne 'rolledback') { $s['status'] = 'ok'; $s['lastError'] = $null }
             if ($s['restartPending'] -and $s['name']) {
@@ -562,6 +572,11 @@ function Invoke-DevStoreRequests {
                 }
                 'check' { $check = $true }
                 'apply' { $apply += $req['repo'] }
+                'set-channel' {
+                    $Config = Set-DevStoreConfigChannel -Config $Config -Repo $req['repo'] -Channel $req['channel']
+                    $apply += $req['repo']
+                    Write-DevStoreLog -Root $Root -App $req['repo'] -Message "now following $($req['channel'] -replace '^pr-', 'test builds of PR #')"
+                }
                 'set-updates' {
                     $Config = Set-DevStoreConfigUpdates -Config $Config -Repo $req['repo'] -Mode $req['mode']
                     $what = 'new apps'
@@ -622,7 +637,10 @@ function Update-DevStoreCatalog {
             $cacheDir = Join-DevStorePath $Root 'catalog' $safe
             $prev = Select-DevStoreHashtable $oldApps[$repo]
             $store = Select-DevStoreStoreAssets $release
+            $previews = @(Get-DevStorePrBuilds -Releases $releases | ForEach-Object {
+                    @{ pr = $_.pr; version = $_.version; title = $_.title; publishedAt = $_.publishedAt } })
             $entry = @{
+                previews = $previews
                 repo = $repo; owner = $owner; shared = [bool]($main -and $owner -ine $main)
                 name = $name; displayName = $name; latest = $version; type = $null
                 description = [string]$repoInfo.description; icon = $null; screenshots = @()
@@ -793,9 +811,10 @@ function Invoke-DevStoreUpdaterRun {
                         if ($byOwner) { $appToken = $byOwner['token'] }
                     }
                     $mode = Get-DevStoreUpdateMode -Config $config -Repo $repo
+                    $channel = Get-DevStoreChannel -Config $config -Repo $repo
                     $applyNow = @($requests['apply'] | Where-Object { $_ -ieq $repo }).Count -gt 0
                     $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `
-                        -Releases $cached -Mode $mode -Apply:$applyNow)
+                        -Releases $cached -Mode $mode -Apply:$applyNow -Channel $channel)
                     if ($null -eq $s) { throw 'The updater returned no result for this app.' }
                 }
                 catch {
