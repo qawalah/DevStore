@@ -68,7 +68,9 @@ class Api:
         shots = [s for s in (self._image(p) for p in app.get("screenshots", [])) if s]
         activity = [e for e in store.parse_activity(files.read_log_lines(actions.LOG_DIR))
                     if e["app"] in (app["name"], app["repo"])][:50]
-        return {"screenshots": shots, "activity": activity, "dataDir": str(actions.data_dir(app["name"]))}
+        platforms = [{"key": p["key"], "shots": [x for x in (self._image(f) for f in p.get("shots", [])) if x]}
+                     for p in app.get("platforms", [])]
+        return {"screenshots": shots, "platforms": platforms, "activity": activity, "dataDir": str(actions.data_dir(app["name"]))}
 
     def get_activity(self) -> list[dict]:
         return store.parse_activity(files.read_log_lines(actions.LOG_DIR))

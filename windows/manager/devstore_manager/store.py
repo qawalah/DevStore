@@ -164,6 +164,32 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
     return acts
 
 
+def _shot_files(c: dict, key: str) -> list[str]:
+    shots = c.get("platformShots") if isinstance(c.get("platformShots"), dict) else {}
+    return [x["file"] for x in (shots.get(key) or []) if isinstance(x, dict) and x.get("file")]
+
+
+def _platforms(c: dict, windows_status: Optional[dict], nas_row: Optional[dict]) -> list[dict]:
+    """Windows, Android and Docker parts of an app: version, date, status and screenshots each."""
+    out = []
+    if windows_status is not None:
+        out.append({"key": "windows", "label": "Windows", "version": c.get("latest") or "", "date": c.get("publishedAt") or "",
+                    "kind": windows_status["kind"], "text": windows_status["text"],
+                    "shots": _shot_files(c, "windows") or [x for x in (c.get("screenshots") or []) if x]})
+    android = c.get("android")
+    if isinstance(android, dict):
+        out.append({"key": "android", "label": "Android", "version": str(android.get("version") or ""),
+                    "date": android.get("publishedAt") or "", "kind": "none", "text": "On your phone through Obtainium",
+                    "shots": _shot_files(c, "android")})
+    docker = c.get("docker")
+    if isinstance(docker, dict):
+        version = str(docker.get("version") or "")
+        kind, text = (nas_row["kind"], nas_row["text"]) if nas_row else ("none", f"Newest version {version}")
+        out.append({"key": "docker", "label": "Docker (NAS)", "version": version, "date": docker.get("publishedAt") or "",
+                    "kind": kind, "text": text, "shots": _shot_files(c, "docker")})
+    return out
+
+
 def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str],
                pending: dict[str, str], now: dt.datetime, running: Optional[set] = None,
                self_version: Optional[str] = None, progress: Optional[dict] = None) -> dict:
@@ -184,6 +210,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
     pend = {str(k).lower(): v for k, v in (pending or {}).items()}
 
     apps = []
+    nas = build_nas(state, now)
+    nas_rows = {r["repo"].lower(): r for r in nas["apps"]}
     for key in sorted(set(configured) | set(cat) | set(states)):
         s, c = states.get(key), cat.get(key, {})
         repo = configured.get(key) or c.get("_repo") or (s or {}).get("_repo") or key
@@ -196,17 +224,29 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             s = {**s, "restartPending": False}   # this window already is the installed version
         is_running = app_type != "service" and name in (running or set())
         status = _status(s, in_config, pend.get(key), service, is_running)
+        actions = _actions(s, in_config, pend.get(key), service, is_self, is_running)
+        type_label = {"gui": "App", "service": "Service"}.get(app_type, "")
+        # Listed for its Android or Docker part only: nothing to install on this PC.
+        on_windows = c.get("windows") is not False or in_config or bool(s)
+        platforms = _platforms(c, status if on_windows else None, nas_rows.get(key))
+        if not on_windows:
+            labels = [p["label"].split(" ")[0] for p in platforms]
+            kinds = " and ".join(labels)
+            status = {"kind": "none", "text": f"{kinds} app", "detail": "", "short": f"{kinds} app"}
+            actions = []
+            type_label = " · ".join(labels)
         apps.append({
             "repo": repo,
             "name": name,
             "displayName": (s or {}).get("displayName") or c.get("displayName") or name,
             "description": c.get("description") or "",
-            "type": {"gui": "App", "service": "Service"}.get(app_type, ""),
+            "type": type_label,
+            "platforms": platforms,
             "installed": bool(in_config and s and s.get("installed")),
             "installedVersion": (s or {}).get("installed") or "",
             "latest": max([v for v in (c.get("latest"), (s or {}).get("latest")) if v], key=_version, default=""),
             "status": status,
-            "actions": _actions(s, in_config, pend.get(key), service, is_self, is_running),
+            "actions": actions,
             "running": is_running,
             "icon": c.get("icon"),
             "screenshots": c.get("screenshots") or [],
@@ -228,7 +268,6 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
                 for a in apps if a["status"]["kind"] == "error"]
     if state.get("catalogError"):
         problems.insert(0, {"repo": "", "title": "Couldn't list your GitHub apps", "detail": explain(state["catalogError"])})
-    nas = build_nas(state, now)
     problems += nas["problems"]
 
     return {
