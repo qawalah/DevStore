@@ -27,6 +27,28 @@ About 30 minutes per app. Before the first app, do the one-time setup:
 3. **Merge DevStore to `main`.** App repos use `@main` of DevStore's
    workflows, so the pipeline must be on `main`.
 
+## Quick path: two skills (recommended)
+
+One-time: in claude.ai → **Settings → Capabilities → Skills → Upload
+skill**, upload [`skills/devstore-handover.zip`](../../skills/devstore-handover.zip).
+The Claude Code skill (`.claude/skills/devstore-onboard`) is already in this
+repo and loads in any Code session on `qawalah/devstore`.
+
+Per app:
+1. In the app's Claude **chat**, say: **"Hand this over to DevStore."**
+   Download the zip it gives you.
+2. Start a Claude **Code** session on `qawalah/devstore`, attach the zip and
+   send: **`/devstore-onboard <app-name>`**
+
+The Code session creates the private repo `qawalah/<app-name>`, sets it up,
+pushes to `main` straight away and watches the first release. Android apps
+still need their two secrets (step 3 below); the session tells you when.
+
+If you can't attach the zip to the Code session, create the repo yourself
+and upload the zip into it (step 2 below), then send the same command.
+
+The steps below are the manual path.
+
 ## Per app
 
 ### Step 1: export the project from the chat
