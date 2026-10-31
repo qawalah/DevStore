@@ -125,3 +125,9 @@ def test_set_nas_rejects_bad_input(root, url, token):
     with pytest.raises(ValueError):
         actions.set_nas(url, token)
     assert bodies(path) == [] and started == []
+
+
+def test_other_errors_are_not_called_unreachable():
+    v = store.build_nas(nas(error="The property 'summary' cannot be found on this object.", **{"qawalah/a": "unknown"}), NOW)
+    assert v["header"]["title"] == "NAS status problem"
+    assert "summary" in v["header"]["sub"]

@@ -641,9 +641,11 @@ function Get-DevStoreWatchtower {
         if ($code -eq 404) { throw "Watchtower's API isn't turned on at $base (HTTP 404). Add WATCHTOWER_HTTP_API_ENDPOINTS=containers,metrics." }
         throw "Can't reach Watchtower at ${base}: $($_.Exception.Message)"
     }
-    $failed = 0
-    if ($status.summary -and $null -ne $status.summary.failed) { $failed = [int]$status.summary.failed }
-    return @{ containers = @($details.containers); lastScan = (ConvertTo-DevStoreUtcText $status.timestamp); failed = $failed }
+    # Before its first scan Watchtower answers without summary or timestamp.
+    $failed = Get-DevStoreProperty (Get-DevStoreProperty $status 'summary') 'failed'
+    if ($null -eq $failed) { $failed = 0 }
+    $containers = @(Get-DevStoreProperty $details 'containers' | Where-Object { $null -ne $_ })
+    return @{ containers = $containers; lastScan = (ConvertTo-DevStoreUtcText (Get-DevStoreProperty $status 'timestamp')); failed = [int]$failed }
 }
 
 function Get-DevStoreNasState {
