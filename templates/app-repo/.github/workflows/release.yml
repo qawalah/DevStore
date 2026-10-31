@@ -5,6 +5,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Test builds: every pull request from a branch in this repo gets a
+  # pre-release you can install before merging; closing the PR deletes them.
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
 permissions:
