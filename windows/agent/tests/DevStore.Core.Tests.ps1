@@ -460,3 +460,40 @@ Describe 'Get-DevStoreNasApps with sparse container entries' {
         (Get-DevStoreNasApps -Docker $docker -Containers $c -LastScan '2026-10-31T10:05:00Z')['qawalah/werd'].status | Should -Be 'ok'
     }
 }
+
+Describe 'Get-DevStoreAndroidRelease' {
+    It 'picks the highest versionCode and reads the versionName' {
+        $r = @(
+            [pscustomobject]@{ tag_name = 'android-v1.9+19'; draft = $false; prerelease = $false; published_at = '2026-10-01T00:00:00Z' },
+            [pscustomobject]@{ tag_name = 'android-v1.10+20'; draft = $false; prerelease = $false; published_at = '2026-10-20T00:00:00Z' },
+            [pscustomobject]@{ tag_name = 'android-v2.0+30'; draft = $true; prerelease = $false; published_at = '' },
+            [pscustomobject]@{ tag_name = 'windows-v9.0.0'; draft = $false; prerelease = $false; published_at = '' }
+        )
+        $a = Get-DevStoreAndroidRelease -Releases $r
+        $a.version | Should -Be '1.10'
+        $a.code | Should -Be 20
+        $a.tag | Should -Be 'android-v1.10+20'
+        $a.publishedAt | Should -Be '2026-10-20T00:00:00Z'
+    }
+    It 'returns nothing without an android release' {
+        Get-DevStoreAndroidRelease -Releases @((New-Release 'windows-v1.0.0')) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Select-DevStorePlatformShots' {
+    It 'finds up to 6 pictures per platform folder, at the root or next to devstore.json' {
+        $paths = @('server/devstore.json', 'store/screenshots/android/02.png', 'store/screenshots/android/01.png',
+            'store/screenshots/android/notes.txt', 'store/screenshots/android/old/x.png', 'server/store/screenshots/docker/a.png') +
+            (1..8 | ForEach-Object { "store/screenshots/windows/w$_.png" }) + @('store/screenshots/flat.png')
+        $p = Select-DevStorePlatformShots -Paths $paths
+        $p['android'] | Should -Be @('store/screenshots/android/01.png', 'store/screenshots/android/02.png')
+        $p['docker'] | Should -Be @('server/store/screenshots/docker/a.png')
+        @($p['windows']).Count | Should -Be 6
+    }
+    It 'returns empty lists when there are no platform folders' {
+        $p = Select-DevStorePlatformShots -Paths @('README.md', 'store/screenshots/flat.png')
+        @($p['android']).Count | Should -Be 0
+        @($p['docker']).Count | Should -Be 0
+        @($p['windows']).Count | Should -Be 0
+    }
+}

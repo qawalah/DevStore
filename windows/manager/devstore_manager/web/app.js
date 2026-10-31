@@ -397,6 +397,14 @@ async function renderApp(v) {
   if (!a) { go(route.from || "discover"); return; }
   const notice = ["error", "warn"].includes(a.status.kind)
     ? `<div class="notice ${a.status.kind}"><strong>${esc(a.status.text)}</strong>${esc(a.status.detail)}</div>` : "";
+  const onPc = a.platforms.some((p) => p.key === "windows");
+  const plats = a.platforms.map((p) => `<section class="platform">
+      <div class="platform-head"><h2>${esc(p.label)}</h2>
+        <span class="muted">${p.version ? `v${esc(p.version)}` : ""}${p.date ? ` · ${esc(ago(p.date))}` : ""}</span>
+        ${stateHtml({ kind: p.kind, text: p.text })}</div>
+      <div class="shots" data-shots="${esc(p.key)}" hidden></div>
+      <p class="muted no-shots" data-noshots="${esc(p.key)}" hidden>No ${esc(p.label.split(" ")[0])} screenshots yet. Add PNGs to <code>store/screenshots/${esc(p.key === "windows" ? "" : p.key + "/")}</code> in the repo.</p>
+    </section>`).join("");
   const facts = [
     ...(notice ? [] : [["Status", stateHtml(a.status)]]),
     ["Installed", a.installedVersion ? `v${esc(a.installedVersion)}` : "No"],
@@ -411,13 +419,13 @@ async function renderApp(v) {
       <div class="detail-actions">${a.actions.filter((x) => !SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div>
     </div>
     ${notice}
-    <div class="shots" id="shots"></div>
+    <div class="platforms">${plats}</div>
     <div class="detail-body">
       <div><h2 style="margin-top:0">About</h2><p class="about">${esc(a.description || "No description yet. Add one to devstore.json in the app's repo.")}</p>
         <h2>Activity</h2><div class="log" id="app-log">Loading…</div></div>
       <aside><div class="facts">${facts}</div>
-        <label class="field-label" for="app-mode">Updates</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}
-        ${channelSelect(a)}
+        ${onPc ? `<label class="field-label" for="app-mode">Updates on this PC</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}` : ""}
+        ${onPc ? channelSelect(a) : ""}
         <div class="side-actions">${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
     </div>`;
   const ch = $("#app-channel");
@@ -426,22 +434,27 @@ async function renderApp(v) {
     toast(res.message, res.ok);
     load();
   });
-  $("#app-mode").addEventListener("change", async (e) => {
+  if ($("#app-mode")) $("#app-mode").addEventListener("change", async (e) => {
     const res = await api().set_updates(a.repo, e.target.value);
     toast(res.message, res.ok);
     load();
   });
   const d = await api().get_details(a.repo);
   if (route.name !== "app" || route.repo !== a.repo) return;
-  $("#shots").innerHTML = d.screenshots.map((s) => `<img src="${s}" alt="Screenshot of ${esc(a.displayName)}">`).join("");
-  $("#shots").hidden = !d.screenshots.length;
-  // A mouse wheel scrolls up and down; turn that into moving the strip sideways.
-  $("#shots").addEventListener("wheel", (e) => {
-    const el = e.currentTarget;
-    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
-    e.preventDefault();
-    el.scrollBy({ left: e.deltaY, behavior: "auto" });
-  }, { passive: false });
+  for (const p of d.platforms || []) {
+    const strip = v.querySelector(`[data-shots="${p.key}"]`);
+    if (!strip) continue;
+    strip.innerHTML = p.shots.map((s) => `<img src="${s}" alt="${esc(a.displayName)} on ${esc(p.key)}">`).join("");
+    strip.hidden = !p.shots.length;
+    v.querySelector(`[data-noshots="${p.key}"]`).hidden = !!p.shots.length;
+    // A mouse wheel scrolls up and down; turn that into moving the strip sideways.
+    strip.addEventListener("wheel", (e) => {
+      const el = e.currentTarget;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollBy({ left: e.deltaY, behavior: "auto" });
+    }, { passive: false });
+  }
   $("#app-log").textContent = d.activity.length ? d.activity.map((e) => `${e.time}  ${e.text}`).join("\n") : "No activity for this app yet.";
 }
 

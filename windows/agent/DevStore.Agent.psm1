@@ -733,6 +733,78 @@ function Invoke-DevStoreRequests {
     return @{ config = $Config; changed = $changed; check = $check; apply = $apply }
 }
 
+function Get-DevStoreRepoTreeEntries {
+    # Every file in the repo at a ref, with its git blob sha (one API call).
+    param([string]$Repo, [string]$Ref, [string]$Token)
+    Initialize-DevStoreHttp
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = $script:UserAgent }
+    $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/git/trees/$([uri]::EscapeDataString($Ref))?recursive=1" `
+        -Headers $headers -Method Get -UseBasicParsing
+    $list = New-Object System.Collections.ArrayList
+    foreach ($e in $resp.tree) { if ($e.type -eq 'blob') { [void]$list.Add(@{ path = [string]$e.path; sha = [string]$e.sha }) } }
+    return $list.ToArray()
+}
+
+function Update-DevStorePlatformShots {
+    # Screenshots per platform (store/screenshots/<windows|android|docker>/ on the default
+    # branch) for the app page, kept in catalog\<owner__repo>.platforms. A file is downloaded
+    # again only when it changes (git blob sha). Also an icon for apps without a Windows release.
+    param([string]$Root, [string]$Repo, $RepoInfo, [string]$Token, [hashtable]$Entry, $Prev, [string]$Safe)
+    $branch = [string](Get-DevStoreProperty $RepoInfo 'default_branch')
+    if ($Prev -and $Prev['platformShots'] -is [hashtable]) { $Entry['platformShots'] = $Prev['platformShots'] }
+    if (-not $branch) { return }
+    $dirRel = "catalog\$Safe.platforms"
+    $dir = Join-DevStorePath $Root 'catalog' "$Safe.platforms"
+    $prevShots = @{}
+    if ($Prev -and $Prev['platformShots'] -is [hashtable]) { $prevShots = $Prev['platformShots'] }
+    try {
+        $tree = @(Get-DevStoreRepoTreeEntries -Repo $Repo -Ref $branch -Token $Token)
+        $sha = @{}
+        foreach ($t in $tree) { $sha[[string](Get-DevStoreProperty $t 'path')] = [string](Get-DevStoreProperty $t 'sha') }
+        $paths = @($tree | ForEach-Object { [string](Get-DevStoreProperty $_ 'path') })
+        $picked = Select-DevStorePlatformShots -Paths $paths
+        $result = @{}
+        $any = $false
+        foreach ($platform in 'windows', 'android', 'docker') {
+            $list = @()
+            $i = 0
+            $old = @($prevShots[$platform] | Where-Object { $_ -is [hashtable] })
+            foreach ($p in @($picked[$platform])) {
+                $i++
+                $rel = "$dirRel\$platform-$i.png"
+                $file = Join-DevStorePath $Root $rel
+                $same = @($old | Where-Object { $_['path'] -eq $p -and $_['sha'] -eq $sha[$p] -and $_['file'] -eq $rel }).Count -gt 0
+                if (-not ($same -and (Test-Path -LiteralPath $file))) {
+                    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+                    Save-DevStoreRepoFile -Repo $Repo -Path $p -Ref $branch -Token $Token -OutFile $file
+                }
+                $list += @{ path = $p; sha = $sha[$p]; file = $rel }
+                $any = $true
+            }
+            $result[$platform] = $list
+        }
+        $Entry['platformShots'] = $result
+        if (-not $Entry['icon']) {
+            $icon = (Select-DevStoreRepoStoreFiles -Paths $paths)['icon']
+            if ($icon) {
+                $rel = "$dirRel\icon.png"
+                $file = Join-DevStorePath $Root $rel
+                $prevIcon = $null
+                if ($Prev) { $prevIcon = $Prev['iconSha'] }
+                if ($prevIcon -ne $sha[$icon] -or -not (Test-Path -LiteralPath $file)) {
+                    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+                    Save-DevStoreRepoFile -Repo $Repo -Path $icon -Ref $branch -Token $Token -OutFile $file
+                }
+                $Entry['icon'] = $rel
+                $Entry['iconSha'] = $sha[$icon]
+                $any = $true
+            }
+        }
+        if (-not $any -and (Test-Path -LiteralPath $dir)) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    }
+    catch { Write-DevStoreLog -Root $Root -App $Repo -Message "couldn't read platform screenshots: $($_.Exception.Message)" }
+}
+
 function Update-DevStoreCatalog {
     # Finds every repo with a Windows release and writes catalog.json for the
     # Manager's Discover page. Store files (icon, screenshots) are cached per
@@ -771,72 +843,94 @@ function Update-DevStoreCatalog {
             $releases = @(Get-DevStoreReleases -Repo $repo -Token $Token)
             $ReleaseCache[$repo] = $releases
             $release = Select-DevStoreRelease -Releases $releases -Bad @()
-            if ($null -eq $release) { continue }
-            $version = (ConvertFrom-DevStoreTag $release.tag_name).ToString()
-            $zip = @($release.assets | Where-Object { $_.name -like "*-$version-win-x64.zip" }) | Select-Object -First 1
-            if (-not $zip) { continue }
-            $name = $zip.name.Substring(0, $zip.name.Length - "-$version-win-x64.zip".Length)
+            $android = Get-DevStoreAndroidRelease -Releases $releases
+            $docker = Get-DevStoreDockerRelease -Releases $releases
+            $zip = $null
+            if ($null -ne $release) {
+                $version = (ConvertFrom-DevStoreTag $release.tag_name).ToString()
+                $zip = @($release.assets | Where-Object { $_.name -like "*-$version-win-x64.zip" }) | Select-Object -First 1
+            }
+            if (-not $zip -and -not $android -and -not $docker) { continue }
             $safe = ConvertTo-DevStoreSafeName $repo
             $cacheRel = "catalog\$safe"
             $cacheDir = Join-DevStorePath $Root 'catalog' $safe
             $prev = Select-DevStoreHashtable $oldApps[$repo]
-            $store = Select-DevStoreStoreAssets $release
-            $previews = @(Get-DevStorePrBuilds -Releases $releases | ForEach-Object {
-                    @{ pr = $_.pr; version = $_.version; title = $_.title; publishedAt = $_.publishedAt } })
-            $entry = @{
-                previews = $previews
-                repo = $repo; owner = $owner; shared = [bool]($main -and $owner -ine $main)
-                name = $name; displayName = $name; latest = $version; type = $null
-                description = [string]$repoInfo.description; icon = $null; screenshots = @()
-                publishedAt = [string]$release.published_at
-            }
-            # storeVersion 2: listings may also take pictures from the repo itself.
-            if ($prev -and $prev['latest'] -eq $version -and $prev['storeVersion'] -ge 2 -and (Test-Path -LiteralPath $cacheDir)) {
-                foreach ($k in 'displayName', 'description', 'type', 'icon', 'screenshots') { $entry[$k] = $prev[$k] }
-            }
-            else {
-                if (Test-Path -LiteralPath $cacheDir) { Remove-Item -LiteralPath $cacheDir -Recurse -Force }
-                New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
-                if ($store['meta']) {
-                    $metaFile = Join-DevStorePath $cacheDir 'store.json'
-                    Save-DevStoreAsset -Repo $repo -AssetId $store['meta'].id -Token $Token -OutFile $metaFile
-                    $meta = Read-DevStoreJson -Path $metaFile -Default @{}
-                    if ($meta['displayName']) { $entry['displayName'] = [string]$meta['displayName'] }
-                    if ($meta['description']) { $entry['description'] = [string]$meta['description'] }
-                    if ($meta['type']) { $entry['type'] = [string]$meta['type'] }
+            if ($zip) {
+                $name = $zip.name.Substring(0, $zip.name.Length - "-$version-win-x64.zip".Length)
+                $store = Select-DevStoreStoreAssets $release
+                $previews = @(Get-DevStorePrBuilds -Releases $releases | ForEach-Object {
+                        @{ pr = $_.pr; version = $_.version; title = $_.title; publishedAt = $_.publishedAt } })
+                $entry = @{
+                    previews = $previews
+                    repo = $repo; owner = $owner; shared = [bool]($main -and $owner -ine $main)
+                    name = $name; displayName = $name; latest = $version; type = $null
+                    description = [string]$repoInfo.description; icon = $null; screenshots = @()
+                    publishedAt = [string]$release.published_at
                 }
-                if ($store['icon']) {
-                    Save-DevStoreAsset -Repo $repo -AssetId $store['icon'].id -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
-                    $entry['icon'] = "$cacheRel\icon.png"
+                # storeVersion 2: listings may also take pictures from the repo itself.
+                if ($prev -and $prev['latest'] -eq $version -and $prev['storeVersion'] -ge 2 -and (Test-Path -LiteralPath $cacheDir)) {
+                    foreach ($k in 'displayName', 'description', 'type', 'icon', 'screenshots') { $entry[$k] = $prev[$k] }
                 }
-                $shots = @()
-                $i = 0
-                foreach ($a in @($store['screenshots'])) {
-                    $i++
-                    Save-DevStoreAsset -Repo $repo -AssetId $a.id -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
-                    $shots += "$cacheRel\screenshot-$i.png"
-                }
-                # No pictures in the release (e.g. built before DevStore attached them):
-                # take them from the repo at this release's tag.
-                if (-not $entry['icon'] -or $shots.Count -eq 0) {
-                    try {
-                        $picked = Select-DevStoreRepoStoreFiles -Paths @(Get-DevStoreRepoTree -Repo $repo -Ref $release.tag_name -Token $Token)
-                        if (-not $entry['icon'] -and $picked['icon']) {
-                            Save-DevStoreRepoFile -Repo $repo -Path $picked['icon'] -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
-                            $entry['icon'] = "$cacheRel\icon.png"
-                        }
-                        if ($shots.Count -eq 0) {
-                            foreach ($p in @($picked['screenshots'])) {
-                                $i++
-                                Save-DevStoreRepoFile -Repo $repo -Path $p -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
-                                $shots += "$cacheRel\screenshot-$i.png"
+                else {
+                    if (Test-Path -LiteralPath $cacheDir) { Remove-Item -LiteralPath $cacheDir -Recurse -Force }
+                    New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+                    if ($store['meta']) {
+                        $metaFile = Join-DevStorePath $cacheDir 'store.json'
+                        Save-DevStoreAsset -Repo $repo -AssetId $store['meta'].id -Token $Token -OutFile $metaFile
+                        $meta = Read-DevStoreJson -Path $metaFile -Default @{}
+                        if ($meta['displayName']) { $entry['displayName'] = [string]$meta['displayName'] }
+                        if ($meta['description']) { $entry['description'] = [string]$meta['description'] }
+                        if ($meta['type']) { $entry['type'] = [string]$meta['type'] }
+                    }
+                    if ($store['icon']) {
+                        Save-DevStoreAsset -Repo $repo -AssetId $store['icon'].id -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
+                        $entry['icon'] = "$cacheRel\icon.png"
+                    }
+                    $shots = @()
+                    $i = 0
+                    foreach ($a in @($store['screenshots'])) {
+                        $i++
+                        Save-DevStoreAsset -Repo $repo -AssetId $a.id -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
+                        $shots += "$cacheRel\screenshot-$i.png"
+                    }
+                    # No pictures in the release (e.g. built before DevStore attached them):
+                    # take them from the repo at this release's tag.
+                    if (-not $entry['icon'] -or $shots.Count -eq 0) {
+                        try {
+                            $picked = Select-DevStoreRepoStoreFiles -Paths @(Get-DevStoreRepoTree -Repo $repo -Ref $release.tag_name -Token $Token)
+                            if (-not $entry['icon'] -and $picked['icon']) {
+                                Save-DevStoreRepoFile -Repo $repo -Path $picked['icon'] -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir 'icon.png')
+                                $entry['icon'] = "$cacheRel\icon.png"
+                            }
+                            if ($shots.Count -eq 0) {
+                                foreach ($p in @($picked['screenshots'])) {
+                                    $i++
+                                    Save-DevStoreRepoFile -Repo $repo -Path $p -Ref $release.tag_name -Token $Token -OutFile (Join-DevStorePath $cacheDir "screenshot-$i.png")
+                                    $shots += "$cacheRel\screenshot-$i.png"
+                                }
                             }
                         }
+                        catch { Write-DevStoreLog -Root $Root -App $repo -Message "couldn't read store pictures from the repo: $($_.Exception.Message)" }
                     }
-                    catch { Write-DevStoreLog -Root $Root -App $repo -Message "couldn't read store pictures from the repo: $($_.Exception.Message)" }
+                    $entry['screenshots'] = $shots
                 }
-                $entry['screenshots'] = $shots
             }
+            else {
+                # Android and/or Docker only: listed, but there's nothing to install on the PC.
+                $name = ($repo -split '/')[1].ToLowerInvariant()
+                if ($docker -and $docker['name']) { $name = $docker['name'] }
+                $entry = @{
+                    previews = @(); repo = $repo; owner = $owner; shared = [bool]($main -and $owner -ine $main)
+                    name = $name; displayName = ($repo -split '/')[1]; latest = $null; type = $null
+                    description = [string]$repoInfo.description; icon = $null; screenshots = @(); publishedAt = $null
+                }
+            }
+            $entry['windows'] = [bool]$zip
+            $entry['android'] = $null
+            if ($android) { $entry['android'] = @{ version = $android['version']; code = $android['code']; publishedAt = $android['publishedAt'] } }
+            $entry['docker'] = $null
+            if ($docker) { $entry['docker'] = @{ version = $docker['version']; publishedAt = $docker['publishedAt']; image = $docker['image'] } }
+            Update-DevStorePlatformShots -Root $Root -Repo $repo -RepoInfo $repoInfo -Token $Token -Entry $entry -Prev $prev -Safe $safe
             $entry['storeVersion'] = 2
             $apps[$repo] = $entry
         }
@@ -1043,7 +1137,7 @@ function Invoke-DevStoreUpdaterRun {
     }
 }
 
-Export-ModuleMember -Function Write-DevStoreNasToken, Read-DevStoreNasToken, Get-DevStoreWatchtower, Get-DevStoreNasState,
+Export-ModuleMember -Function Get-DevStoreRepoTreeEntries, Update-DevStorePlatformShots, Write-DevStoreNasToken, Read-DevStoreNasToken, Get-DevStoreWatchtower, Get-DevStoreNasState,
     Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
     Read-DevStoreTokens, Write-DevStoreTokens,
     Remove-DevStoreAppCore, Get-DevStoreStarredRepos, Update-DevStoreStarred, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,

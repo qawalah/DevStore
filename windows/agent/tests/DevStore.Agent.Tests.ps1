@@ -458,13 +458,19 @@ Describe 'Update-DevStoreCatalog' {
         (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Tool'].displayName | Should -Be 'Tool Box'
     }
 
-    It 'lists only repos with Windows releases, with store details cached locally' {
+    It 'lists repos with Windows, Android or Docker releases, with store details cached locally' {
         $cache = @{}
         Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache $cache
 
         $cat = Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}
-        @($cat.apps.Keys) | Should -Be @('qawalah/Tool')
+        @($cat.apps.Keys | Sort-Object) | Should -Be @('qawalah/AndroidOnly', 'qawalah/Tool')
+        $phone = $cat.apps['qawalah/AndroidOnly']
+        $phone.windows | Should -BeFalse
+        $phone.android.version | Should -Be '1.0'
+        $phone.latest | Should -BeNullOrEmpty
         $app = $cat.apps['qawalah/Tool']
+        $app.windows | Should -BeTrue
+        $app.android | Should -BeNullOrEmpty
         $app.displayName | Should -Be 'Tool Box'
         $app.description | Should -Be 'Does tool things.'
         @($app.previews).Count | Should -Be 0
@@ -833,5 +839,52 @@ Describe 'Watchtower answers before its first scan' {
         $w.failed | Should -Be 0
         $w.lastScan | Should -BeNullOrEmpty
         @($w.containers).Count | Should -Be 0
+    }
+}
+
+
+Describe 'Catalog platform listing' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Get-DevStoreAccessibleRepos {
+            @([pscustomobject]@{ full_name = 'qawalah/Werd'; description = 'Family app'; private = $true; default_branch = 'main' })
+        }
+        Mock -ModuleName DevStore.Agent Get-DevStoreReleases {
+            @([pscustomobject]@{ tag_name = 'android-v2.3+57'; draft = $false; prerelease = $false; assets = @(); published_at = '2026-10-29T08:00:00Z' },
+              [pscustomobject]@{ tag_name = 'docker-v1.8.0'; draft = $false; prerelease = $false; assets = @(); published_at = '2026-10-31T10:00:00Z'
+                  body = 'Image `ghcr.io/qawalah/werd-server:1.8.0` (also `latest`).' })
+        }
+        $script:Tree = @(
+            [pscustomobject]@{ path = 'store/screenshots/android/01.png'; sha = 'a1' },
+            [pscustomobject]@{ path = 'store/screenshots/android/02.png'; sha = 'a2' },
+            [pscustomobject]@{ path = 'store/screenshots/docker/01.png'; sha = 'd1' },
+            [pscustomobject]@{ path = 'server/winres/icon.png'; sha = 'i1' },
+            [pscustomobject]@{ path = 'server/devstore.json'; sha = 'm1' })
+        Mock -ModuleName DevStore.Agent Get-DevStoreRepoTreeEntries { $script:Tree }
+        Mock -ModuleName DevStore.Agent Save-DevStoreRepoFile { param($Repo, $Path, $Ref, $Token, $OutFile) Set-Content $OutFile "png $Path" }
+    }
+
+    It 'lists an Android and Docker app with screenshots per platform and an icon' {
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        $app = (Read-DevStoreJson -Path (Join-Path $Root 'catalog.json') -Default @{}).apps['qawalah/Werd']
+        $app.windows | Should -BeFalse
+        $app.name | Should -Be 'werd-server'
+        $app.android.version | Should -Be '2.3'
+        $app.docker.version | Should -Be '1.8.0'
+        @($app.platformShots.android).Count | Should -Be 2
+        @($app.platformShots.docker).Count | Should -Be 1
+        @($app.platformShots.windows).Count | Should -Be 0
+        Test-Path (Join-Path $Root $app.platformShots.android[0].file) | Should -BeTrue
+        Test-Path (Join-Path $Root $app.icon) | Should -BeTrue
+        Should -Invoke -ModuleName DevStore.Agent Get-DevStoreRepoTreeEntries -Times 1 -ParameterFilter { $Ref -eq 'main' }
+    }
+
+    It 'downloads a screenshot again only when it changed' {
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        $script:Tree[0].sha = 'a1-new'
+        Update-DevStoreCatalog -Root $Root -Tokens @(@{ login = 'qawalah'; token = 't' }) -ReleaseCache @{}
+        # first pass: 3 screenshots + icon; second pass: only the changed screenshot
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreRepoFile -Times 5 -Exactly
     }
 }

@@ -514,6 +514,52 @@ function Set-DevStoreConfigNas {
     return $Config
 }
 
+# ---------------------------------------------------------------- per-platform listing
+
+$script:AndroidTagPattern = '^android-v(.+)\+(\d+)$'
+$script:Platforms = @('windows', 'android', 'docker')
+
+function Get-DevStoreAndroidRelease {
+    # The newest published android-v<versionName>+<versionCode> release (by versionCode).
+    param($Releases)
+    $best = $null
+    $bestCode = -1
+    $bestName = $null
+    foreach ($r in @($Releases)) {
+        if ($null -eq $r -or (Get-DevStoreProperty $r 'draft') -or (Get-DevStoreProperty $r 'prerelease')) { continue }
+        $m = [regex]::Match([string](Get-DevStoreProperty $r 'tag_name'), $script:AndroidTagPattern)
+        if (-not $m.Success) { continue }
+        $code = [int]$m.Groups[2].Value
+        if ($code -gt $bestCode) { $best = $r; $bestCode = $code; $bestName = $m.Groups[1].Value }
+    }
+    if ($null -eq $best) { return $null }
+    return @{ version = $bestName; code = $bestCode; tag = [string]$best.tag_name
+        publishedAt = (ConvertTo-DevStoreUtcText (Get-DevStoreProperty $best 'published_at')) }
+}
+
+function Select-DevStorePlatformShots {
+    # Screenshots per platform from a repo's file list: store/screenshots/<windows|android|docker>/*.png,
+    # next to the app's devstore.json or at the repo root. Up to 6 each, sorted by name.
+    param([string[]]$Paths)
+    $Paths = @($Paths)
+    $manifest = @($Paths | Where-Object { $_ -match '(^|/)devstore\.json$' } | Sort-Object { $_.Length }) | Select-Object -First 1
+    $prefixes = @('')
+    if ($manifest -and $manifest -match '/') { $prefixes = @($manifest.Substring(0, $manifest.LastIndexOf('/') + 1), '') }
+    $out = @{}
+    foreach ($platform in $script:Platforms) {
+        $shots = @()
+        foreach ($pre in $prefixes) {
+            if ($shots.Count) { break }
+            $dir = "${pre}store/screenshots/$platform/"
+            $shots = @($Paths | Where-Object {
+                    $_.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) -and $_ -match '\.png$' -and $_.Substring($dir.Length) -notmatch '/'
+                } | Sort-Object | Select-Object -First 6)
+        }
+        $out[$platform] = $shots
+    }
+    return $out
+}
+
 Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, ConvertTo-DevStoreHashtable,
     Read-DevStoreJson, Write-DevStoreJson, Get-DevStoreAction, Get-DevStorePruneList, Test-DevStoreHash,
     New-DevStoreWinswXml, Test-DevStoreRepoName, Set-DevStoreConfigApp, ConvertTo-DevStoreSafeName,
@@ -522,4 +568,5 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     ConvertFrom-DevStorePrTag, Get-DevStorePrBuilds, Select-DevStoreChannelRelease, Get-DevStoreReleaseVersion,
     Get-DevStoreChannel, Set-DevStoreConfigChannel, Test-DevStoreStarredDue, Get-DevStoreGitHubUrl,
     ConvertTo-DevStoreStarredEntry, Get-DevStoreDockerRelease, ConvertTo-DevStoreImageName, Get-DevStoreNasApps,
-    Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText, Get-DevStoreProperty
+    Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText, Get-DevStoreProperty,
+    Get-DevStoreAndroidRelease, Select-DevStorePlatformShots

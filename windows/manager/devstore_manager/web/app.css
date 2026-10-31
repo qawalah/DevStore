@@ -241,3 +241,8 @@ h2 { font: 600 16px/1.3 var(--font-display); margin: 26px 0 8px; }
 .nas-form { flex-wrap: wrap; }
 .nas-form input { flex: 1 1 220px; }
 .nas-row { grid-template-columns: 1fr; cursor: default; }
+.platforms { margin-top: 18px; display: grid; gap: 18px; }
+.platform-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.platform-head h2 { margin: 0; }
+.platform .shots { margin-top: 10px; }
+.no-shots { margin: 6px 0 0; }
