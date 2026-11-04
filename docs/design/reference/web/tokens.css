@@ -1,0 +1,24 @@
+/* CrossPaths web tokens and motion, copied from server/server/static/index.html.
+   Source of truth is DESIGN.md; this is a snapshot to copy from. */
+
+:root{--bg:#0b1220;--panel:#121a2b;--panel2:#18233a;--line:#25324d;--text:#e8eefc;--muted:#8a97b4;--accent:#2dd4bf;--accent-g:#22b8cf;--onaccent:#04222a;--accent2:#60a5fa;--warn:#f59e0b;--bad:#f87171;--good:#4ade80;--r:16px;
+  --chrome:rgba(18,26,43,.94);--chip:rgba(11,18,32,.82);--toast:#1d2942;--kb:#1d2840;--ic:#22304d;--hover:#1e2b46;--live:#1c3a3a;--scrim:rgba(3,6,12,.6);--shadow:rgba(0,0,0,.35);
+  --warnbg:#3a2d10;--warnbd:#6b4a0f;--warntx:#ffd58a;--badbg:#3a1a22;--badbd:#5a2531;--badtx:#ffc9c9;--goodbd:#1f5a37;--runbd:#24457a;--hit:rgba(255,255,255,.06);
+  --sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);color-scheme:dark}
+:root[data-theme=light]{--bg:#f3f5fa;--panel:#ffffff;--panel2:#eef1f7;--line:#dbe1ec;--text:#0f172a;--muted:#5b6578;--accent2:#2563eb;--warn:#b45309;--bad:#dc2626;--good:#15803d;
+  --chrome:rgba(255,255,255,.94);--chip:rgba(255,255,255,.94);--toast:#ffffff;--kb:#eef2fa;--ic:#e6ebf5;--hover:#e7ecf6;--live:#d8f3ee;--scrim:rgba(15,23,42,.35);--shadow:rgba(15,23,42,.14);
+  --warnbg:#fff4dc;--warnbd:#f1c77a;--warntx:#7a4a00;--badbg:#fdecee;--badbd:#f3b4bc;--badtx:#9f1d2c;--goodbd:#b7e4c7;--runbd:#bfd3fb;--hit:rgba(15,23,42,.06);color-scheme:light}
+
+/* the accent is set from script: --accent, --accent-g, --onaccent (see ACCENTS in index.html) */
+
+@keyframes xdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes xhalo{from{transform:scale(0);opacity:0}to{transform:none;opacity:1}}
+@keyframes xdrop{0%{transform:translateY(-90px);opacity:0}40%{opacity:1}70%{transform:translateY(0) scale(1.06,.9)}85%{transform:translateY(-7px)}100%{transform:none;opacity:1}}
+@keyframes xring{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.6);opacity:0}}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+@keyframes invite{0%{transform:scale(.8);opacity:.75}100%{transform:scale(2.1);opacity:0}}
+@keyframes wpop{0%{transform:scale(0);opacity:0}60%{transform:scale(1.12);opacity:1}80%{transform:scale(.96)}100%{transform:none;opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;animation-delay:0s!important}}
