@@ -55,7 +55,16 @@ class Api:
                                 progress=files.load_json(root / "progress.json", {}))
         for a in view["apps"]:
             a["iconData"] = self._image(a.get("icon"))
-        view["counts"]["starredNew"] = starred.build(files.load_json(root / "starred.json", {}), self._seen())[0]["newCount"]
+        starred_data = files.load_json(root / "starred.json", {})
+        view["counts"]["starredNew"] = starred.build(starred_data, self._seen())[0]["newCount"]
+        # Apps installed from Starred: GitHub's description and the owner's picture.
+        info = {str(r.get("repo", "")).lower(): r for r in (starred_data.get("repos") or []) if isinstance(r, dict)}
+        for a in view["apps"]:
+            r = info.get(a["repo"].lower()) if a.get("starred") else None
+            if r:
+                a["description"] = a["description"] or str(r.get("description") or "")
+                if not a.get("iconData") and starred.safe_avatar(r.get("avatar")):
+                    a["iconData"] = r["avatar"]
         view["settings"]["locations"] = self._locations()
         view["settings"]["version"] = app_version()
         self._view = view
@@ -79,7 +88,7 @@ class Api:
         apps = self._view.get("apps") or self.get_view().get("apps", [])
         return next((a for a in apps if a["repo"].lower() == str(repo).lower()), None)
 
-    # ------------------------------------------------------------ starred (watch only)
+    # ------------------------------------------------------------ starred
 
     @staticmethod
     def _seen_path() -> Path:
@@ -100,7 +109,8 @@ class Api:
     def get_starred(self) -> dict:
         data = files.load_json(actions.ROOT / "starred.json", {})
         old = self._seen()
-        view, seen = starred.build(data, old)
+        apps = (self._view.get("apps") if self._view else None) or self.get_view().get("apps", [])
+        view, seen = starred.build(data, old, apps)
         if seen != old:
             self._save_seen(seen)
         return view
@@ -134,6 +144,14 @@ class Api:
 
     def install(self, repo: str) -> dict:
         return self._result(lambda: actions.install(repo), "Installing. This usually takes under a minute.")
+
+    def install_starred(self, repo: str, mode: Optional[str] = None) -> dict:
+        return self._result(lambda: actions.install_starred(repo, mode or None),
+                            "Installing. DevStore keeps it updated the way you chose.")
+
+    def set_starred_auto(self, on: bool) -> dict:
+        msg = "Apps you star from now on install by themselves." if on else "Starred apps install only when you click Install."
+        return self._result(lambda: actions.set_starred_auto_install(bool(on)), msg)
 
     def remove(self, repo: str) -> dict:
         return self._result(lambda: actions.remove(repo), "Removing. Its data folder is kept.")

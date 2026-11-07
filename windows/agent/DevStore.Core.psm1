@@ -211,14 +211,17 @@ function Test-DevStoreRepoName {
 
 function Set-DevStoreConfigApp {
     # Adds ($Present = $true) or removes a repo in config.apps; case-insensitive, idempotent.
-    param([hashtable]$Config, [string]$Repo, [bool]$Present)
+    # $Source 'starred': a starred repo (not built by DevStore), installed its own way.
+    param([hashtable]$Config, [string]$Repo, [bool]$Present, [string]$Source = '')
     $apps = @()
     if ($Config.ContainsKey('apps') -and $null -ne $Config['apps']) { $apps = @($Config['apps']) }
     $others = @($apps | Where-Object { $_ -and $_['repo'] -ine $Repo })
     if ($Present) {
         $existing = @($apps | Where-Object { $_ -and $_['repo'] -ieq $Repo })
         if ($existing.Count -gt 0) { $Config['apps'] = $apps; return $Config }
-        $others += @{ repo = $Repo }
+        $entry = @{ repo = $Repo }
+        if ($Source -eq 'starred') { $entry['source'] = 'starred' }
+        $others += $entry
     }
     $Config['apps'] = $others
     return $Config
@@ -246,6 +249,12 @@ function ConvertFrom-DevStoreRequest {
         if ($token -and ($token.Length -gt 256 -or $token -match '\s')) { return $null }
         return @{ action = $action; repo = $null; mode = $null; url = $url; token = $token }
     }
+    if ($action -eq 'set-starred') {
+        # Install newly starred repos by themselves: 'on' or 'off'.
+        $value = [string]$Request['value']
+        if ($value -notin @('on', 'off')) { return $null }
+        return @{ action = $action; repo = $null; mode = $null; value = $value }
+    }
     $repo = [string]$Request['repo']
     if ($action -eq 'set-updates') {
         $mode = [string]$Request['mode']
@@ -262,7 +271,12 @@ function ConvertFrom-DevStoreRequest {
     }
     if ($action -notin @('install', 'remove', 'apply')) { return $null }
     if (-not (Test-DevStoreRepoName $repo)) { return $null }
-    return @{ action = $action; repo = $repo; mode = $null }
+    $source = $null
+    $mode = $null
+    if ($action -eq 'install' -and [string]$Request['source'] -eq 'starred') { $source = 'starred' }
+    # An install may say how its updates should arrive.
+    if ($action -eq 'install' -and [string]$Request['mode'] -in $script:UpdateModes) { $mode = [string]$Request['mode'] }
+    return @{ action = $action; repo = $repo; mode = $mode; source = $source }
 }
 
 function Get-DevStoreUpdateMode {
@@ -391,7 +405,7 @@ function Get-DevStoreGitHubUrl {
 
 function ConvertTo-DevStoreStarredEntry {
     # A starred repo and its newest stable release, as plain data for the window.
-    # Watch only: nothing here is ever downloaded or run by DevStore.
+    # Nothing is downloaded here: installing is Update-DevStoreStarredApp's job.
     param($Repo, $Releases)
     $name = [string]$Repo.full_name
     $repoUrl = Get-DevStoreGitHubUrl -Url ([string]$Repo.html_url) -Fallback "https://github.com/$name"
@@ -415,8 +429,143 @@ function ConvertTo-DevStoreStarredEntry {
             tag = [string]$rel.tag_name; title = $title; publishedAt = [string]$rel.published_at; notes = $notes
             url = (Get-DevStoreGitHubUrl -Url ([string]$rel.html_url) -Fallback "$repoUrl/releases"); assets = $assets
         }
+        # The file DevStore would install on this PC, if the release has one.
+        $win = Select-DevStoreStarredAsset -Assets $rel.assets
+        if ($win) { $latest['windows'] = @{ name = [string]$win.name; size = [long]$win.size } } else { $latest['windows'] = $null }
     }
     return @{ repo = $name; description = [string]$Repo.description; url = $repoUrl; avatar = $avatar; latest = $latest }
+}
+
+# ---------------------------------------------------------------- installing starred apps
+# Starred repos aren't built by DevStore, so their releases follow no format:
+# any tag, any file names. These pick the newest stable release, the file in
+# it that is a Windows download DevStore can install (a .zip or a portable
+# .exe, never an installer), and the program inside it.
+
+$script:StarredPrefix = 'starred-'
+
+function Select-DevStoreStarredRelease {
+    # Newest published, non-prerelease release (by publish date), whatever its tag.
+    param($Releases)
+    $flat = foreach ($x in @($Releases)) { if ($x -is [System.Array]) { foreach ($y in $x) { $y } } else { $x } }
+    $ok = @($flat | Where-Object { $_ -and -not $_.draft -and -not $_.prerelease -and $_.tag_name })
+    if (-not $ok.Count) { return $null }
+    return @($ok | Sort-Object -Descending { [string]$_.published_at })[0]
+}
+
+function Get-DevStoreStarredAssetScore {
+    # How likely a release file is the Windows build to install. $null = never.
+    param([string]$Name)
+    $n = $Name.ToLowerInvariant()
+    if ($n -notmatch '\.(zip|exe)$') { return $null }
+    $isExe = $n.EndsWith('.exe')
+    if ($n -match '(?<![a-z])(linux|darwin|mac|macos|osx|apple|android|ios|freebsd|openbsd|source|src|symbols|debug)(?![a-z])') { return $null }
+    if ($n -match 'arm64|aarch64|(?<![a-z])arm(?![a-z])') { return $null }
+    # Installers can't be run silently in a reliable way, so they stay "download in browser".
+    if ($n -match 'setup|installer|(?<![a-z])install(?![a-z])|(?<![a-z])inst(?![a-z])') { return $null }
+    $windows = $n -match '(?<![a-z])win(dows)?(32|64)?(?![a-z])|(?<![a-z])pc(?![a-z])'
+    if (-not $isExe -and -not $windows) { return $null }   # a zip with no Windows in its name could be anything
+    $score = 0
+    if ($windows) { $score += 10 }
+    if ($isExe) { $score += 2 }
+    if ($n -match 'x86[_-]64|x64|amd64|win64|64-?bit') { $score += 5 }
+    elseif ($n -match '(?<![a-z0-9])(x86|i[36]86|ia32|32-?bit)(?![a-z0-9])') { $score -= 5 }
+    if ($n -match 'portable') { $score += 3 }
+    return $score
+}
+
+function Select-DevStoreStarredAsset {
+    # The release file to install on this PC, or $null when there is none.
+    param($Assets)
+    $best = $null
+    $bestScore = $null
+    foreach ($a in @($Assets)) {
+        if ($null -eq $a -or -not $a.name) { continue }
+        $score = Get-DevStoreStarredAssetScore -Name ([string]$a.name)
+        if ($null -eq $score) { continue }
+        if ($null -eq $bestScore -or $score -gt $bestScore) { $best = $a; $bestScore = $score }
+    }
+    return $best
+}
+
+function Select-DevStoreStarredExe {
+    # The program to open from an unpacked release: @(@{ path = 'sub\app.exe'; size }) -> 'sub\app.exe'.
+    # Skips uninstallers, updaters, crash reporters and helpers; prefers the repo's
+    # name, then files near the top, then the biggest.
+    param($Files, [string]$Repo)
+    $norm = { param($t) ($t.ToLowerInvariant() -replace '[^a-z0-9]', '') }
+    $want = & $norm (($Repo -split '/')[-1])
+    $best = $null
+    $bestKey = $null
+    foreach ($f in @($Files)) {
+        if ($null -eq $f) { continue }
+        $path = ([string]$f['path']) -replace '/', '\'
+        $leaf = ($path -split '\\')[-1].ToLowerInvariant()
+        if ($leaf -notmatch '\.exe$') { continue }
+        if ($leaf -match '^(unins|uninstall)|setup|installer|^update(r)?\.exe$|crash|helper|vc_?redist|^createdump|^elevate') { continue }
+        $stem = & $norm ($leaf -replace '\.exe$', '')
+        $match = 0
+        if ($want -and $stem -eq $want) { $match = 2 } elseif ($want -and $stem -and ($stem.Contains($want) -or $want.Contains($stem))) { $match = 1 }
+        $depth = @($path -split '\\').Count
+        $key = @($match, (-$depth), [long]$f['size'])
+        $better = $false
+        if ($null -eq $bestKey) { $better = $true }
+        else {
+            for ($i = 0; $i -lt 3; $i++) {
+                if ($key[$i] -gt $bestKey[$i]) { $better = $true; break }
+                if ($key[$i] -lt $bestKey[$i]) { break }
+            }
+        }
+        if ($better) { $best = $path; $bestKey = $key }
+    }
+    return $best
+}
+
+function ConvertTo-DevStoreStarredAppName {
+    # 'Some.One/My_Tool' -> 'starred-some-one--my-tool': the app's folder under apps\.
+    param([string]$Repo)
+    $parts = $Repo.ToLowerInvariant() -split '/'
+    $clean = @($parts | ForEach-Object { ($_ -replace '[^a-z0-9]+', '-').Trim('-') })
+    return $script:StarredPrefix + ($clean -join '--')
+}
+
+function ConvertTo-DevStoreVersionFolder {
+    # A release tag as a safe folder name ('v1.2/beta' -> 'v1.2-beta').
+    param([string]$Tag)
+    $f = ($Tag -replace '[^A-Za-z0-9._-]+', '-').Trim('-', '.')
+    if (-not $f) { $f = 'release' }
+    if ($f.Length -gt 60) { $f = $f.Substring(0, 60) }
+    return $f
+}
+
+function Get-DevStoreAssetSha256 {
+    # GitHub's own sha256 for a release file ('digest': 'sha256:<hex>'), or $null.
+    param($Asset)
+    $d = [string](Get-DevStoreProperty -Object $Asset -Name 'digest')
+    if ($d -match '^sha256:([0-9a-fA-F]{64})$') { return $Matches[1] }
+    return $null
+}
+
+function Get-DevStoreStarredAutoInstall {
+    # Which starred repos to install by themselves: ones starred since the last
+    # look (not in $Known) that have a Windows download, when auto-install is on.
+    # The first look only remembers what's there, so turning it on never installs
+    # everything you starred before. Returns @{ install = @(repos); known = @(repos) }.
+    param($Repos, $Known, [hashtable]$Config)
+    $now = @(@($Repos) | Where-Object { $_ -and $_['repo'] } | ForEach-Object { [string]$_['repo'] })
+    $install = @()
+    if ($null -ne $Known -and $Config['starredAutoInstall'] -eq $true) {
+        $configured = @(@($Config['apps']) | Where-Object { $_ } | ForEach-Object { [string]$_['repo'] })
+        foreach ($r in @($Repos)) {
+            if (-not $r -or -not $r['repo']) { continue }
+            $name = [string]$r['repo']
+            if (@($Known | Where-Object { $_ -ieq $name }).Count) { continue }
+            if (@($configured | Where-Object { $_ -ieq $name }).Count) { continue }
+            $latest = $r['latest']
+            if ($latest -is [hashtable] -and $latest['windows']) { $install += $name }
+        }
+    }
+    return @{ install = $install; known = $now }
 }
 
 # ---------------------------------------------------------------- Docker apps on the NAS
@@ -569,4 +718,6 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Get-DevStoreChannel, Set-DevStoreConfigChannel, Test-DevStoreStarredDue, Get-DevStoreGitHubUrl,
     ConvertTo-DevStoreStarredEntry, Get-DevStoreDockerRelease, ConvertTo-DevStoreImageName, Get-DevStoreNasApps,
     Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText, Get-DevStoreProperty,
-    Get-DevStoreAndroidRelease, Select-DevStorePlatformShots
+    Get-DevStoreAndroidRelease, Select-DevStorePlatformShots,
+    Select-DevStoreStarredRelease, Get-DevStoreStarredAssetScore, Select-DevStoreStarredAsset, Select-DevStoreStarredExe,
+    ConvertTo-DevStoreStarredAppName, ConvertTo-DevStoreVersionFolder, Get-DevStoreAssetSha256, Get-DevStoreStarredAutoInstall

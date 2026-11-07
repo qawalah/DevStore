@@ -1,20 +1,28 @@
-"""Starred repos: watch only. Turns the updater's starred.json into what the
-window shows and tracks which versions this Windows user has already seen.
-DevStore never downloads or runs anything from these repos; links open in the
-browser, and only https://github.com links are allowed."""
+"""Starred repos: turns the updater's starred.json into what the window shows,
+tracks which versions this Windows user has already seen, and joins in the
+install state of the ones installed from Starred. The updater does the
+installing; links the window opens go to the browser, and only
+https://github.com links are allowed."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 
 def safe_url(url: Any) -> bool:
     return isinstance(url, str) and url.startswith("https://github.com/")
 
 
-def build(data: dict, seen: dict) -> tuple[dict, dict]:
+def safe_avatar(url: Any) -> bool:
+    return isinstance(url, str) and url.startswith("https://avatars.githubusercontent.com/")
+
+
+def build(data: dict, seen: dict, apps: Optional[list] = None) -> tuple[dict, dict]:
     """(view, seen). A repo seen for the first time counts as already seen, so only
-    versions released after DevStore started watching are marked New."""
+    versions released after DevStore started watching are marked New. `apps` is
+    the store view's app list: each item gets `app` (its status and actions) when
+    it was installed from Starred, else None."""
     data = data if isinstance(data, dict) else {}
+    installed = {str(a.get("repo", "")).lower(): a for a in (apps or []) if isinstance(a, dict) and a.get("starred")}
     seen = dict(seen) if isinstance(seen, dict) else {}
     items = []
     for r in data.get("repos") or []:
@@ -24,7 +32,11 @@ def build(data: dict, seen: dict) -> tuple[dict, dict]:
         tag = (latest or {}).get("tag")
         if tag and r["repo"] not in seen:
             seen[r["repo"]] = tag
-        items.append({**r, "latest": latest, "isNew": bool(tag) and seen.get(r["repo"]) != tag})
+        app = installed.get(str(r["repo"]).lower())
+        windows = (latest or {}).get("windows")
+        items.append({**r, "latest": latest, "isNew": bool(tag) and seen.get(r["repo"]) != tag,
+                      "installable": isinstance(windows, dict) and bool(windows.get("name")),
+                      "app": {k: app[k] for k in ("repo", "status", "actions", "installedVersion", "updates")} if app else None})
     items.sort(key=lambda i: (i["latest"] is None, -_stamp((i["latest"] or {}).get("publishedAt"))))
     view = {"items": items, "newCount": sum(1 for i in items if i["isNew"]),
             "updated": str(data.get("updated") or ""), "error": str(data.get("error") or "")}

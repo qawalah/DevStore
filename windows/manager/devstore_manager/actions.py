@@ -121,11 +121,37 @@ def pending_requests() -> dict[str, str]:
     return out
 
 
-def install(repo: str) -> None:
+def install(repo: str, source: str | None = None) -> None:
+    """source 'starred': a starred repo, installed from its own releases (not built by DevStore)."""
     repo = repo.strip()
     if not REPO_RE.match(repo):
         raise ValueError("Enter the repo as owner/name, for example qawalah/my-app.")
-    _write_request("install", repo)
+    if source not in (None, "starred"):
+        raise ValueError(f"Unknown source {source!r}.")
+    if source:
+        _write_request("install", repo, source=source)
+    else:
+        _write_request("install", repo)
+    start_updater()
+
+
+def install_starred(repo: str, mode: str | None = None) -> None:
+    """Install a starred repo's Windows release; `mode` (auto/download/notify) is how its updates arrive."""
+    if mode is not None and mode not in UPDATE_MODES:
+        raise ValueError(f"Unknown update setting {mode!r}.")
+    repo = repo.strip()
+    if not REPO_RE.match(repo):
+        raise ValueError(f"Can't install {repo!r}.")
+    extra = {"source": "starred"}
+    if mode:
+        extra["mode"] = mode   # in the same request, so it's set the moment the app is added
+    _write_request("install", repo, **extra)
+    start_updater()
+
+
+def set_starred_auto_install(on: bool) -> None:
+    """Install repos you star from now on by themselves (when they have a Windows download)."""
+    _write_request("set-starred", value="on" if on else "off")
     start_updater()
 
 

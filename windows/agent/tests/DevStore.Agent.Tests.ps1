@@ -888,3 +888,178 @@ Describe 'Catalog platform listing' {
         Should -Invoke -ModuleName DevStore.Agent Save-DevStoreRepoFile -Times 5 -Exactly
     }
 }
+
+Describe 'Update-DevStoreStarredApp' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Fixtures = Join-Path $script:Root 'fixtures'
+        New-Item -ItemType Directory -Path $script:Fixtures -Force | Out-Null
+        $script:Junctions = @{}
+        $script:Shortcuts = @{}
+        Mock -ModuleName DevStore.Agent Save-DevStoreAsset {
+            param($Repo, $AssetId, $Token, $OutFile)
+            Copy-Item (Join-Path $script:Fixtures $AssetId) $OutFile
+        }
+        Mock -ModuleName DevStore.Agent Set-DevStoreJunction { param($Link, $Target) $script:Junctions[$Link] = $Target }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $false }
+        Mock -ModuleName DevStore.Agent New-DevStoreShortcut { param($DisplayName, $Target) $script:Shortcuts[$DisplayName] = $Target }
+    }
+    BeforeAll {
+        # A third-party release: any tag, a zip with the program in a subfolder, maybe GitHub's digest.
+        function New-StarredRelease {
+            param([string]$Tag, [switch]$Exe, [switch]$WrongDigest, [switch]$NoDigest, [string]$At = '2026-11-01T00:00:00Z')
+            $id = "tool-$Tag"
+            if ($Exe) {
+                $file = Join-Path $script:Fixtures $id
+                Set-Content -Path $file -Value "portable $Tag"
+                $assetName = 'Tool.exe'
+            }
+            else {
+                $src = Join-Path $TestDrive "starred-src-$Tag"
+                New-Item -ItemType Directory -Path (Join-Path $src 'Tool') -Force | Out-Null
+                Set-Content -Path (Join-Path $src 'Tool\Tool.exe') -Value "tool $Tag"
+                Set-Content -Path (Join-Path $src 'Tool\Uninstall.exe') -Value 'u'
+                $file = Join-Path $script:Fixtures "$id.zip"
+                Compress-Archive -Path (Join-Path $src '*') -DestinationPath $file -Force
+                Move-Item $file (Join-Path $script:Fixtures $id)
+                $file = Join-Path $script:Fixtures $id
+                $assetName = "tool-$Tag-windows-x64.zip"
+            }
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+            if ($WrongDigest) { $hash = '0' * 64 }
+            $asset = [pscustomobject]@{ id = $id; name = $assetName; size = 10; digest = "sha256:$hash" }
+            if ($NoDigest) { $asset = [pscustomobject]@{ id = $id; name = $assetName; size = 10 } }
+            [pscustomobject]@{ tag_name = $Tag; draft = $false; prerelease = $false; published_at = $At
+                assets = @($asset, [pscustomobject]@{ id = 'src'; name = 'tool-linux.tar.gz'; size = 1 }) }
+        }
+    }
+
+    It 'installs the Windows zip of the newest release and adds a shortcut' {
+        $rel = New-StarredRelease -Tag 'v1.0'
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be 'v1.0'
+        $s.source | Should -Be 'starred'
+        $s.name | Should -Be 'starred-someone--tool'
+        $s.type | Should -Be 'gui'
+        $s.exe | Should -Be 'Tool\Tool.exe'
+        $dir = Join-Path $Root 'apps\starred-someone--tool'
+        Test-Path (Join-Path $dir 'versions\v1.0\Tool\Tool.exe') | Should -BeTrue
+        $script:Junctions[(Join-Path $dir 'current')] | Should -Be (Join-Path $dir 'versions\v1.0')
+        $script:Shortcuts['tool'] | Should -Be (Join-Path $dir 'current\Tool\Tool.exe')
+    }
+
+    It 'installs a portable exe as it is, without a checksum' {
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v2' -Exe -NoDigest))
+        $s.status | Should -Be 'ok'
+        $s.exe | Should -Be 'Tool.exe'
+    }
+
+    It 'refuses a download whose checksum does not match' {
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.0' -WrongDigest))
+        $s.status | Should -Be 'error'
+        $s.lastError | Should -Match 'sha256'
+        $s.installed | Should -BeNullOrEmpty
+    }
+
+    It 'says so when the release only has an installer' {
+        $rel = [pscustomobject]@{ tag_name = 'v1'; draft = $false; prerelease = $false; published_at = ''
+            assets = @([pscustomobject]@{ id = 1; name = 'ToolSetup.exe'; size = 1 }) }
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $s.status | Should -Be 'error'
+        $s.lastError | Should -Match 'Installers are download-in-browser only'
+    }
+
+    It 'updates automatically and keeps the previous release' {
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.0'))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.1' -At '2026-11-05T00:00:00Z'))
+        $s.installed | Should -Be 'v1.1'
+        $s.previous | Should -Be 'v1.0'
+        $s.status | Should -Be 'ok'
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.2' -At '2026-11-06T00:00:00Z'))
+        @(Get-ChildItem (Join-Path $Root 'apps\starred-someone--tool\versions') -Directory | ForEach-Object Name | Sort-Object) | Should -Be @('v1.1', 'v1.2')
+    }
+
+    It 'notify mode only reports; download mode downloads and waits; Apply installs' {
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.0')) -Mode 'notify'
+        $s.installed | Should -Be 'v1.0'   # a first install always happens
+        $new = New-StarredRelease -Tag 'v1.1'
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($new) -Mode 'notify'
+        $s.status | Should -Be 'available'
+        $s.latest | Should -Be 'v1.1'
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($new) -Mode 'download'
+        $s.status | Should -Be 'ready'
+        $s.installed | Should -Be 'v1.0'
+        Test-Path (Join-Path $Root 'apps\starred-someone--tool\versions\v1.1\.verified') | Should -BeTrue
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($new) -Mode 'download' -Apply
+        $s.installed | Should -Be 'v1.1'
+        $s.status | Should -Be 'ok'
+    }
+
+    It 'waits while the app is open' {
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.0'))
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @((New-StarredRelease -Tag 'v1.1'))
+        $s.status | Should -Be 'pending'
+        $s.installed | Should -Be 'v1.0'
+    }
+}
+
+Describe 'Starred apps in an updater pass' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Read-DevStoreTokens { @(@{ login = 'qawalah'; token = 'token' }) }
+        Mock -ModuleName DevStore.Agent Initialize-DevStoreLayout {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreCatalog {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreStarred {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreAgentFiles { $false }
+        Mock -ModuleName DevStore.Agent Update-DevStoreApp { @{ status = 'ok'; installed = '1.0.0'; bad = @() } }
+        Mock -ModuleName DevStore.Agent Update-DevStoreStarredApp { @{ status = 'ok'; installed = 'v1'; source = 'starred'; bad = @() } }
+    }
+    BeforeAll {
+        function Set-Starred($Repos) {
+            Write-DevStoreJson -Path (Join-Path $Root 'starred.json') -Object @{ updated = 'x'; error = $null
+                repos = @($Repos | ForEach-Object { @{ repo = $_; latest = @{ tag = 'v1'; windows = @{ name = 'x-win.zip' } } } }) }
+        }
+    }
+
+    It 'installs starred apps their own way and your own apps as before' {
+        Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @(@{ repo = 'qawalah/a' }, @{ repo = 'someone/tool'; source = 'starred' }) }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarredApp -Times 1 -Exactly -ParameterFilter { $Repo -eq 'someone/tool' }
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreApp -Times 1 -Exactly -ParameterFilter { $Repo -eq 'qawalah/a' }
+    }
+
+    It 'an install request from Starred is remembered as starred' {
+        Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @() }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'requests') -Force | Out-Null
+        Write-DevStoreJson -Path (Join-Path $Root 'requests\1.json') -Object @{ action = 'install'; repo = 'someone/tool'; source = 'starred'; mode = 'download' }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        $config = Read-DevStoreJson -Path (Join-Path $Root 'config.json') -Default @{}
+        $config.apps[0].source | Should -Be 'starred'
+        $config.apps[0].updates | Should -Be 'download'
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarredApp -Times 1 -Exactly -ParameterFilter { $Mode -eq 'download' }
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarredApp -Times 1 -Exactly
+    }
+
+    It 'auto-install: installs repos starred after it was switched on, never the earlier ones' {
+        Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @(); starredAutoInstall = $true }
+        Set-Starred @('a/before')
+        Invoke-DevStoreUpdaterRun -Root $Root
+        (Read-DevStoreJson -Path (Join-Path $Root 'config.json') -Default @{}).apps.Count | Should -Be 0
+        Set-Starred @('a/before', 'b/after')
+        Invoke-DevStoreUpdaterRun -Root $Root
+        $config = Read-DevStoreJson -Path (Join-Path $Root 'config.json') -Default @{}
+        @($config.apps | ForEach-Object { $_.repo }) | Should -Be @('b/after')
+        $config.apps[0].source | Should -Be 'starred'
+    }
+
+    It 'the auto-install switch is changed by a request' {
+        Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{ apps = @() }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'requests') -Force | Out-Null
+        Write-DevStoreJson -Path (Join-Path $Root 'requests\1.json') -Object @{ action = 'set-starred'; value = 'on' }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        (Read-DevStoreJson -Path (Join-Path $Root 'config.json') -Default @{}).starredAutoInstall | Should -BeTrue
+    }
+}
