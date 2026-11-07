@@ -91,14 +91,35 @@ so:
 3. Within 5 minutes their apps appear under **Shared**. **Settings → GitHub
    accounts** lists every account DevStore uses.
 
-### Starred repos (watch only)
+### Starred repos
 **Starred** lists the public repos you've starred on GitHub (other than your
 own), with each one's latest release and its notes. A **New** badge marks a
 version released since you last looked. DevStore checks your stars about
 once an hour, or right away when you press **Check for updates**.
 
-DevStore **never downloads or installs** starred apps. **Download in browser**
-opens the file's GitHub link in your browser, so you decide what to run.
+**Installing a starred app.** When a repo's latest release has a Windows
+download DevStore can install, its page shows **Install on this PC**:
+1. Pick what happens when there's a new release: **Automatically**,
+   **Download, I'll install** or **Just tell me** (the same choices as your
+   own apps; change it later on the app's page).
+2. Click **Install**. DevStore installs it into
+   `C:\DevStore\apps\starred-<owner>--<repo>\`, adds it to the Start menu and
+   lists it under **Installed**. **Remove** takes it off the PC again.
+
+What DevStore can install: a `.zip` with Windows in its name (for example
+`tool-1.2-windows-x64.zip`) or a portable `.exe`. It skips installers
+(`setup.exe`, `.msi`), other systems (Linux, macOS, ARM) and source code.
+It checks the file's SHA-256 when GitHub or the release publishes one. For
+anything else, **Download in browser** still opens the file's GitHub link.
+
+**Install apps you star automatically.** Turn on **Settings → Starred apps**
+and any repo you star *from then on* is installed within the hour (if its
+release has a Windows download), with updates set to your default. Repos
+you starred before turning it on are left alone.
+
+Starred apps come from their owners' releases: DevStore doesn't build or
+check them, so only install apps you trust. They always run as a normal
+window app, never as a service.
 
 ### Where things are
 **Settings → Where things are** opens these folders:

@@ -264,3 +264,28 @@ def test_stale_progress_is_ignored():
     prog = {"running": True, "text": "Looking for updates", "started": "2026-10-30T10:00:00Z", "updated": "2026-10-30T10:00:05Z"}
     u = store.build_view({"apps": []}, {"lastRun": T, "lastRunResult": "ok"}, {}, {}, {}, NOW, progress=prog)["updater"]
     assert u["kind"] == "ok"
+
+
+def test_app_installed_from_starred_is_marked_and_has_no_data_folder():
+    v = view(config={"apps": [{"repo": "someone/tool", "source": "starred"}], "starredAutoInstall": True},
+             state={"lastRun": T, "lastRunResult": "ok",
+                    "apps": {"someone/tool": {"name": "starred-someone--tool", "type": "gui", "installed": "v1.2",
+                                              "latest": "v1.2", "status": "ok", "displayName": "tool",
+                                              "exe": "Tool\\Tool.exe", "source": "starred"}}})
+    a = app(v, "someone/tool")
+    assert a["starred"] is True and a["installed"] is True
+    assert a["status"]["text"] == "Installed · up to date"
+    assert a["actions"] == ["open", "remove"]
+    assert a["exe"] == "Tool\\Tool.exe"
+    assert v["settings"]["starredAutoInstall"] is True
+    assert view()["settings"]["starredAutoInstall"] is False
+
+
+def test_starred_app_update_waiting_with_free_form_tags():
+    v = view(config={"apps": [{"repo": "someone/tool", "source": "starred", "updates": "notify"}]},
+             state={"lastRun": T, "apps": {"someone/tool": {"name": "starred-someone--tool", "type": "gui", "installed": "v1.2",
+                                                            "latest": "nightly-7", "status": "available", "source": "starred"}}})
+    a = app(v, "someone/tool")
+    assert a["status"]["kind"] == "update"
+    assert a["actions"][0] == "update"
+    assert a["updates"] == "notify"

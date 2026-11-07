@@ -14,7 +14,8 @@ version, it installs itself on your devices:
   The **DevStore** window is your app store. It finds the Windows apps in
   your GitHub (and repos shared with you), shows icons and screenshots,
   installs them, keeps them updated (automatically, or when you choose),
-  and updates itself.
+  and updates itself. It can also install and update the Windows releases
+  of repos you've starred on GitHub.
 - **Docker (NAS):** each Docker app repo builds an image on GitHub, checks
   that it starts healthy, and publishes it privately to GitHub's container
   registry (`ghcr.io`). **Watchtower** on the NAS installs it.

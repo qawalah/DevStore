@@ -172,3 +172,23 @@ def test_check_now_always_leaves_a_request(root, monkeypatch):
     actions.check_now()
     bodies = [json.loads(f.read_text()) for f in (root / "requests").glob("*.json")]
     assert {"action": "check"} in bodies
+
+
+def test_install_from_starred_sends_source_and_update_mode_in_one_request(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.install_starred(" someone/tool ", "notify")
+    bodies = [json.loads(f.read_text()) for f in (root / "requests").glob("*.json")]
+    assert bodies == [{"action": "install", "repo": "someone/tool", "source": "starred", "mode": "notify"}]
+    assert actions.pending_requests() == {"someone/tool": "install"}
+    with pytest.raises(ValueError):
+        actions.install_starred("someone/tool", "sometimes")
+    with pytest.raises(ValueError):
+        actions.install("someone/tool", source="elsewhere")
+
+
+def test_starred_auto_install_switch(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.set_starred_auto_install(True)
+    assert [json.loads(f.read_text()) for f in (root / "requests").glob("*.json")] == [{"action": "set-starred", "value": "on"}]

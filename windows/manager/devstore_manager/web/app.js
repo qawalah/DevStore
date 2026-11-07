@@ -24,6 +24,9 @@ const ICONS = {
 
 const ACTIONS = {
   install: { label: "Install", icon: "download", cls: "btn-primary", call: (r) => api().install(r) },
+  installStarred: { label: "Install", icon: "download", cls: "btn-primary",
+    call: (r) => api().install_starred(r, ($("#star-mode") || {}).value || null),
+    confirm: (name) => `Install ${name} on this PC?\n\nIt comes from its owner's GitHub releases. DevStore doesn't build or check it, so only install apps you trust.` },
   update: { label: "Update", icon: "download", cls: "btn-primary", call: (r) => api().update(r) },
   open: { label: "Open", icon: "open", cls: "btn-primary", call: (r) => api().open_app(r) },
   start: { label: "Start", icon: "play", cls: "btn-primary", call: (r) => api().service(r, "Start") },
@@ -91,6 +94,9 @@ function buttonHtml(action, repo, opts = {}) {
   const title = opts.compact ? ` title="${label}" aria-label="${label}"` : "";
   return `<button class="btn ${a.cls}" data-action="${action}" data-repo="${esc(repo)}"${title}>${ICONS[a.icon]}${text}</button>`;
 }
+
+// '1.2.0' -> 'v1.2.0'; starred apps' own tags ('v1.2', 'nightly-7') stay as they are.
+const ver = (x) => (/^\d/.test(String(x || "")) ? `v${x}` : String(x || ""));
 
 function matches(app) {
   if (!search) return true;
@@ -168,8 +174,8 @@ function renderBanner() {
 
 function renderDiscover(v) {
   $("#view-title").textContent = "Discover";
-  const apps = view.apps.filter((a) => !a.isSelf && !a.shared && matches(a));
-  if (!view.apps.some((a) => !a.isSelf && !a.shared)) {
+  const apps = view.apps.filter((a) => !a.isSelf && !a.shared && !a.starred && matches(a));
+  if (!view.apps.some((a) => !a.isSelf && !a.shared && !a.starred)) {
     v.innerHTML = emptyHtml("No Windows apps found yet",
       "Apps show up here once one of your GitHub repos has a Windows release. Push an app with a <code>devstore.json</code> to its main branch and it appears within a few minutes.") + addHtml();
     return;
@@ -188,7 +194,7 @@ function addHtml() {
 
 function cardHtml(a) {
   const primary = a.actions.find((x) => ["update", "install", "open", "start", "relaunch"].includes(x));
-  const meta = [a.type, a.testBuild ? `Test build #${a.testBuild}` : a.installed ? `v${a.installedVersion}` : a.latest && `v${a.latest}`,
+  const meta = [a.type, a.testBuild ? `Test build #${a.testBuild}` : a.installed ? ver(a.installedVersion) : a.latest && ver(a.latest),
     a.shared && `by ${a.owner}`]
     .filter(Boolean).join(" · ");
   return `<article class="card" data-goto="${esc(a.repo)}" tabindex="0">
@@ -249,6 +255,10 @@ function renderSettings(v) {
       <p class="muted">What DevStore does when one of your apps has a new version. You can change this per app on its page.</p>
       ${modeSelect("default-mode", st.defaultUpdates, false)}
       <p class="muted" id="mode-help">${esc(MODES.find((m) => m[0] === st.defaultUpdates)[2])}</p></section>
+    <section><h2>Starred apps</h2>
+      <label class="check"><input type="checkbox" id="starred-auto"${st.starredAutoInstall ? " checked" : ""}>
+        <span>Install apps I star from now on automatically</span></label>
+      <p class="muted">When you star a repo on GitHub whose latest release has a Windows download, DevStore installs it within the hour, with updates set as above. Repos you starred before turning this on are left alone; install those from <button class="link" data-nav="starred">Starred</button>. ${TRUST_NOTE}</p></section>
     <section><h2>Where things are</h2><div class="facts">
       ${folder("programs", "Programs", (loc.programs || "") + "\\<app name>")}
       ${folder("data", "App data", (loc.data || "") + "\\<app name>  (kept when an app is removed)")}
@@ -278,6 +288,13 @@ function renderSettings(v) {
     toast(res.message, res.ok);
     load();
   });
+  $("#starred-auto").addEventListener("change", async (e) => {
+    if (e.target.checked && !confirm(`Install apps you star from now on automatically?\n\n${TRUST_NOTE}`)) { e.target.checked = false; return; }
+    const res = await api().set_starred_auto(e.target.checked);
+    toast(res.message, res.ok);
+    document.activeElement.blur();
+    load();
+  });
   $("#default-mode").addEventListener("change", async (e) => {
     const res = await api().set_updates(null, e.target.value);
     toast(res.message, res.ok);
@@ -299,7 +316,7 @@ function renderNas(v) {
   v.innerHTML = head + list;
 }
 
-// ---------------------------------------------------------------- starred (watch only)
+// ---------------------------------------------------------------- starred
 
 function ago(iso) {
   if (!iso) return "";
@@ -314,12 +331,25 @@ function starIcon(item, size = "sm") {
     : iconHtml({ name: item.repo, displayName: item.repo.split("/")[1] }, size);
 }
 
+const fileSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+const TRUST_NOTE = "Starred apps come from their owners' GitHub releases. DevStore doesn't build or check them, so install only apps you trust.";
+
+function starButton(i) {
+  // Installed: its main action (Open, Update…). Installable: Install. Otherwise: see the release.
+  if (i.app) {
+    const main = i.app.actions.find((x) => ["update", "open", "relaunch"].includes(x));
+    return main ? buttonHtml(main, i.app.repo) : "";
+  }
+  if (i.installable) return buttonHtml("installStarred", i.repo);
+  return i.latest ? `<button class="btn btn-quiet" data-star="${esc(i.repo)}">${ICONS.open}<span>Release</span></button>` : "";
+}
+
 async function renderStarred(v) {
   $("#view-title").textContent = "Starred";
   const st = await api().get_starred();
   if (route.name !== "starred") return;
   const items = st.items.filter((i) => !search || [i.repo, i.description].some((x) => String(x || "").toLowerCase().includes(search.toLowerCase())));
-  const note = `<p class="muted watch-note">DevStore only watches these for new versions. It never downloads or runs them; downloads open in your browser.</p>`;
+  const note = `<p class="muted watch-note">${TRUST_NOTE} Change how new starred apps are handled in <button class="link" data-nav="settings">Settings</button>.</p>`;
   if (!st.items.length) {
     v.innerHTML = emptyHtml(st.error ? "Couldn't read your stars" : "No starred repos yet",
       st.error ? esc(st.error) : "Star a repo on GitHub and it shows up here within an hour (or press Check for updates).");
@@ -330,9 +360,29 @@ async function renderStarred(v) {
     <div class="row" data-star="${esc(i.repo)}" tabindex="0">
       ${starIcon(i)}
       <div style="min-width:0"><div class="row-name">${esc(i.repo)} ${i.isNew ? '<span class="chip chip-new">New</span>' : ""}</div>
-        <div class="row-sub">${i.latest ? `${esc(i.latest.title)} · ${esc(ago(i.latest.publishedAt))}` : "No releases"}${i.description ? ` · ${esc(i.description)}` : ""}</div></div>
-      <div>${i.latest ? `<button class="btn btn-quiet" data-star="${esc(i.repo)}">${ICONS.open}<span>Release</span></button>` : ""}</div>
+        <div class="row-sub">${i.app ? `${stateHtml(i.app.status, true)} · ` : ""}${i.latest ? `${esc(i.latest.title)} · ${esc(ago(i.latest.publishedAt))}` : "No releases"}${i.description ? ` · ${esc(i.description)}` : ""}</div></div>
+      <div>${starButton(i)}</div>
     </div>`).join("")}</div>`;
+}
+
+function starInstallHtml(i) {
+  const r = i.latest;
+  if (i.app) {
+    return `<section class="star-install"><h2>On this PC</h2>
+      <p>${stateHtml(i.app.status)} <span class="muted">· ${esc(ver(i.app.installedVersion) || "installing")}</span></p>
+      <div class="detail-actions">${starButton(i)}<button class="btn btn-quiet" data-goto="${esc(i.app.repo)}"><span>Manage updates</span></button></div></section>`;
+  }
+  if (!r) return "";
+  if (!i.installable) {
+    return `<section class="star-install"><h2>On this PC</h2>
+      <p class="muted">This release has no Windows download DevStore can install and keep updated (it needs a <code>.zip</code> for Windows or a portable <code>.exe</code>; installers aren't supported). You can still download its files in your browser below.</p></section>`;
+  }
+  const w = r.windows;
+  return `<section class="star-install"><h2>Install on this PC</h2>
+    <p>DevStore installs <strong>${esc(w.name)}</strong> <span class="muted">(${fileSize(w.size)})</span>, adds it to the Start menu, and keeps it updated from new releases.</p>
+    <label class="field-label" for="star-mode">When there's a new release</label>${modeSelect("star-mode", view.settings.defaultUpdates, false)}
+    <div class="detail-actions" style="margin-top:12px">${buttonHtml("installStarred", i.repo)}</div>
+    <p class="muted hint">${TRUST_NOTE}</p></section>`;
 }
 
 async function renderStar(v) {
@@ -341,21 +391,20 @@ async function renderStar(v) {
   if (!i) { go("starred"); return; }
   if (i.isNew) api().mark_seen(i.repo);
   const r = i.latest;
-  const size = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
   v.innerHTML = `
     <button class="link detail-back" data-nav="starred">${ICONS.back}<span>Back</span></button>
     <div class="detail-head">${starIcon(i, "lg")}
       <div><h1 class="detail-title">${esc(i.repo)}</h1><div class="detail-sub">${esc(i.description || "")}</div></div>
       <div class="detail-actions"><button class="btn btn-quiet" data-link="${esc(i.url)}">${ICONS.open}<span>Open on GitHub</span></button></div>
     </div>
+    ${starInstallHtml(i)}
     ${r ? `<h2>${esc(r.title)} <span class="muted">· ${esc(r.tag)} · ${esc(ago(r.publishedAt))}</span></h2>
       <div class="log notes">${esc(r.notes || "No release notes.")}</div>
       <h2>Files</h2>
       ${r.assets.length ? `<div class="rows">${r.assets.map((a) => `<div class="row" style="cursor:default">
-          <span></span><div><div class="row-name">${esc(a.name)}</div><div class="row-sub">${size(a.size)}</div></div>
+          <span></span><div><div class="row-name">${esc(a.name)}</div><div class="row-sub">${fileSize(a.size)}</div></div>
           <button class="btn btn-quiet" data-link="${esc(a.url)}">${ICONS.download}<span>Download in browser</span></button></div>`).join("")}</div>`
-        : `<p class="muted">No files attached. <button class="link" data-link="${esc(r.url)}">See the release on GitHub</button>.</p>`}
-      <p class="muted watch-note">DevStore doesn't install starred apps. Downloads open in your browser, so you decide what to run.</p>`
+        : `<p class="muted">No files attached. <button class="link" data-link="${esc(r.url)}">See the release on GitHub</button>.</p>`}`
       : `<p class="muted">This repo has no releases yet.</p>`}`;
 }
 
@@ -373,7 +422,7 @@ function renderInstalled(v) {
     <div class="row" data-goto="${esc(a.repo)}" tabindex="0">
       ${iconHtml(a, "sm")}
       <div style="min-width:0"><div class="row-name">${esc(a.displayName)} <span class="chip">${esc(a.type || "App")}</span></div>
-        <div class="row-sub">${stateHtml(a.status)}${a.installedVersion ? ` <span class="muted">· v${esc(a.installedVersion)}</span>` : ""}</div></div>
+        <div class="row-sub">${stateHtml(a.status)}${a.installedVersion ? ` <span class="muted">· ${esc(ver(a.installedVersion))}</span>` : ""}</div></div>
       <div class="detail-actions">${a.actions.filter((x) => x !== "remove" && x !== "data").slice(0, 2).map((x) => buttonHtml(x, a.repo)).join("")}</div>
     </div>`).join("")}</div>`;
   v.innerHTML = (attention.length ? `<h2 class="section-title">Needs attention</h2>${rows(attention)}` : "") +
@@ -400,28 +449,28 @@ async function renderApp(v) {
   const onPc = a.platforms.some((p) => p.key === "windows");
   const plats = a.platforms.map((p) => `<section class="platform">
       <div class="platform-head"><h2>${esc(p.label)}</h2>
-        <span class="muted">${p.version ? `v${esc(p.version)}` : ""}${p.date ? ` · ${esc(ago(p.date))}` : ""}</span>
+        <span class="muted">${p.version ? esc(ver(p.version)) : ""}${p.date ? ` · ${esc(ago(p.date))}` : ""}</span>
         ${stateHtml({ kind: p.kind, text: p.text })}</div>
       <div class="shots" data-shots="${esc(p.key)}" hidden></div>
-      <p class="muted no-shots" data-noshots="${esc(p.key)}" hidden>No ${esc(p.label.split(" ")[0])} screenshots yet. Add PNGs to <code>store/screenshots/${esc(p.key === "windows" ? "" : p.key + "/")}</code> in the repo.</p>
+      <p class="muted no-shots" data-noshots="${esc(p.key)}" hidden${a.starred ? ' data-starred="1"' : ""}>No ${esc(p.label.split(" ")[0])} screenshots yet. Add PNGs to <code>store/screenshots/${esc(p.key === "windows" ? "" : p.key + "/")}</code> in the repo.</p>
     </section>`).join("");
   const facts = [
     ...(notice ? [] : [["Status", stateHtml(a.status)]]),
-    ["Installed", a.installedVersion ? `v${esc(a.installedVersion)}` : "No"],
-    ["Latest release", a.latest ? `v${esc(a.latest)}` : "–"],
+    ["Installed", a.installedVersion ? esc(ver(a.installedVersion)) : "No"],
+    ["Latest release", a.latest ? esc(ver(a.latest)) : "–"],
     ["Kind", esc(a.type === "Service" ? "Background service" : a.type ? "App with a window" : "–")],
     ["GitHub", esc(a.repo)],
   ].map(([k, val]) => `<div class="fact"><span>${k}</span><span>${val}</span></div>`).join("");
   v.innerHTML = `
     <button class="link detail-back" data-nav="${route.from || "discover"}">${ICONS.back}<span>Back</span></button>
     <div class="detail-head">${iconHtml(a, "lg")}
-      <div><h1 class="detail-title">${esc(a.displayName)}</h1><div class="detail-sub">${esc(a.type || "App")} · ${esc(a.repo)}${a.shared ? ` · shared by ${esc(a.owner)}` : ""}</div></div>
+      <div><h1 class="detail-title">${esc(a.displayName)}</h1><div class="detail-sub">${esc(a.type || "App")} · ${esc(a.repo)}${a.shared ? ` · shared by ${esc(a.owner)}` : ""}${a.starred ? " · from Starred" : ""}</div></div>
       <div class="detail-actions">${a.actions.filter((x) => !SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div>
     </div>
     ${notice}
     <div class="platforms">${plats}</div>
     <div class="detail-body">
-      <div><h2 style="margin-top:0">About</h2><p class="about">${esc(a.description || "No description yet. Add one to devstore.json in the app's repo.")}</p>
+      <div><h2 style="margin-top:0">About</h2><p class="about">${esc(a.description || (a.starred ? "No description on GitHub." : "No description yet. Add one to devstore.json in the app's repo."))}</p>${a.starred ? `<p class="muted">Installed from your GitHub stars: DevStore takes each new release's Windows download from <button class="link" data-link="https://github.com/${esc(a.repo)}/releases">its GitHub releases</button>. It isn't built or checked by DevStore.</p>` : ""}
         <h2>Activity</h2><div class="log" id="app-log">Loading…</div></div>
       <aside><div class="facts">${facts}</div>
         ${onPc ? `<label class="field-label" for="app-mode">Updates on this PC</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}` : ""}
@@ -446,7 +495,8 @@ async function renderApp(v) {
     if (!strip) continue;
     strip.innerHTML = p.shots.map((s) => `<img src="${s}" alt="${esc(a.displayName)} on ${esc(p.key)}">`).join("");
     strip.hidden = !p.shots.length;
-    v.querySelector(`[data-noshots="${p.key}"]`).hidden = !!p.shots.length;
+    const none = v.querySelector(`[data-noshots="${p.key}"]`);
+    none.hidden = !!p.shots.length || none.dataset.starred === "1";   // starred apps have no DevStore screenshots
     // A mouse wheel scrolls up and down; turn that into moving the strip sideways.
     strip.addEventListener("wheel", (e) => {
       const el = e.currentTarget;
@@ -461,7 +511,7 @@ async function renderApp(v) {
 // ---------------------------------------------------------------- events
 
 function go(name, repo = null) {
-  const from = route.name === "app" ? route.from : route.name;
+  const from = route.name === "app" ? route.from : route.name === "star" ? "starred" : route.name;
   route = name === "app" ? { name, repo, from } : { name, repo: null };
   $("#view").scrollTop = 0;
   render();

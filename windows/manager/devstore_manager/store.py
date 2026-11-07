@@ -136,7 +136,7 @@ def _test_build(version: Any) -> Optional[int]:
 
 
 def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service: Optional[str], is_self: bool,
-             running: bool = False) -> list[str]:
+             running: bool = False, from_starred: bool = False) -> list[str]:
     if pending:
         return []
     if not in_config:
@@ -158,7 +158,8 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
         acts += ["relaunch", "close"]  # relaunch = force close, then open again
     else:
         acts.append("open")
-    acts.append("data")
+    if not from_starred:   # someone else's app keeps its data wherever it likes
+        acts.append("data")
     if not is_self:
         acts.append("remove")
     return acts
@@ -203,6 +204,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
     entries = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and e.get("repo")]
     configured = {str(e["repo"]).lower(): str(e["repo"]) for e in entries}
     modes = {str(e["repo"]).lower(): e.get("updates") for e in entries if e.get("updates") in UPDATE_MODES}
+    from_starred = {str(e["repo"]).lower() for e in entries if e.get("source") == "starred"}
     channels = {str(e["repo"]).lower(): str(e["channel"]) for e in entries
                 if re.match(r"^(stable|pr-\d+)$", str(e.get("channel", "")))}
     default_mode = config.get("defaultUpdates") if isinstance(config, dict) else None
@@ -224,7 +226,8 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             s = {**s, "restartPending": False}   # this window already is the installed version
         is_running = app_type != "service" and name in (running or set())
         status = _status(s, in_config, pend.get(key), service, is_running)
-        actions = _actions(s, in_config, pend.get(key), service, is_self, is_running)
+        is_starred = key in from_starred or (s or {}).get("source") == "starred"
+        actions = _actions(s, in_config, pend.get(key), service, is_self, is_running, is_starred)
         type_label = {"gui": "App", "service": "Service"}.get(app_type, "")
         # Listed for its Android or Docker part only: nothing to install on this PC.
         on_windows = c.get("windows") is not False or in_config or bool(s)
@@ -251,6 +254,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "icon": c.get("icon"),
             "screenshots": c.get("screenshots") or [],
             "isSelf": is_self,
+            "starred": is_starred,
             "shared": bool(c.get("shared")),
             "owner": c.get("owner") or repo.split("/")[0],
             "updates": modes.get(key, default_mode),
@@ -284,6 +288,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         },
         "settings": {
             "defaultUpdates": default_mode,
+            "starredAutoInstall": bool(isinstance(config, dict) and config.get("starredAutoInstall") is True),
             "accounts": [str(x) for x in (state.get("accounts") or []) if x],
         },
     }

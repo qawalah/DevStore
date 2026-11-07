@@ -41,3 +41,21 @@ def test_only_github_links_may_be_opened():
     assert not starred.safe_url("https://github.com.evil.example/x")
     assert not starred.safe_url("javascript:alert(1)")
     assert not starred.safe_url("file:///C:/Windows/System32/calc.exe")
+
+
+def test_installable_and_install_state_are_joined_in():
+    a = entry("a/one", "v1"); a["latest"]["windows"] = {"name": "one-win64.zip", "size": 5}
+    b = entry("b/two", "v1"); b["latest"]["windows"] = None
+    apps = [{"repo": "A/One", "starred": True, "status": {"kind": "ok"}, "actions": ["open", "remove"],
+             "installedVersion": "v1", "updates": "auto"},
+            {"repo": "b/two", "starred": False, "status": {}, "actions": [], "installedVersion": "", "updates": "auto"}]
+    view, _ = starred.build({"repos": [a, b, entry("c/none")]}, {}, apps)
+    one, two, none = view["items"][0], view["items"][1], view["items"][2]
+    assert one["installable"] is True and one["app"]["actions"] == ["open", "remove"]
+    assert two["installable"] is False and two["app"] is None   # not installed from Starred
+    assert none["installable"] is False and none["app"] is None
+
+
+def test_only_github_avatars_are_used_as_icons():
+    assert starred.safe_avatar("https://avatars.githubusercontent.com/u/1?v=4")
+    assert not starred.safe_avatar("https://evil.example/a.png")

@@ -501,6 +501,159 @@ function Update-DevStoreApp {
     }
 }
 
+function Update-DevStoreStarredApp {
+    # Installs or updates an app from a starred repo (someone else's, not built by
+    # DevStore). Takes the newest stable release's Windows .zip or portable .exe,
+    # checks its sha256 when one is published, unpacks it into apps\starred-...,
+    # and adds a Start menu shortcut. Always a window app; never a service, never
+    # run by the updater itself. Same -Mode and -Apply as Update-DevStoreApp, and
+    # likewise never throws.
+    param([string]$Repo, $AppState, [string]$Root, [string]$Token, $Releases = $null,
+        [string]$Mode = 'auto', [switch]$Apply)
+    $s = Copy-DevStoreAppState $AppState
+    $s['lastChecked'] = Get-DevStoreTimestamp
+    $s['source'] = 'starred'
+    $name = ConvertTo-DevStoreStarredAppName $Repo
+    try {
+        if ($null -eq $Releases) { $Releases = Get-DevStoreReleases -Repo $Repo -Token $Token }
+        $release = Select-DevStoreStarredRelease -Releases $Releases
+        if ($null -eq $release) {
+            if (-not $s['installed']) { $s['status'] = 'error'; $s['lastError'] = 'This repo has no release to install yet.' }
+            return $s
+        }
+        $asset = Select-DevStoreStarredAsset -Assets $release.assets
+        $tag = [string]$release.tag_name
+        if (-not $asset) {
+            if ($s['installed']) {
+                # Keep the installed version; say why it isn't updating.
+                $s['latest'] = $tag
+                if ($s['installed'] -ne $tag) {
+                    $s['status'] = 'error'
+                    $s['lastError'] = "Release $tag has no Windows download DevStore can install (a .zip or a portable .exe). Installers are download-in-browser only."
+                }
+                return $s
+            }
+            throw "Release $tag has no Windows download DevStore can install (a .zip or a portable .exe). Installers are download-in-browser only."
+        }
+        $s['latest'] = $tag
+        $appDir = Join-DevStorePath $Root 'apps' $name
+        $action = 'update'
+        if (-not $s['installed']) { $action = 'install' }
+        elseif ($s['installed'] -eq $tag) { $action = 'none' }
+
+        if ($action -eq 'none') {
+            $s['status'] = 'ok'; $s['lastError'] = $null
+            if ($s['restartPending']) {
+                $s['restartPending'] = $false
+                if ($s.ContainsKey('updatedAt') -and $s['updatedAt']) {
+                    $s['restartPending'] = Test-DevStoreOldProcessRunning -AppDir $appDir -Since $s['updatedAt']
+                }
+            }
+            return $s
+        }
+
+        $waitForUser = ($action -eq 'update' -and -not $Apply)
+        if ($waitForUser -and $Mode -eq 'notify') {
+            if ($s['status'] -ne 'available') { Write-DevStoreLog -Root $Root -App $Repo -Message "$tag is available" }
+            $s['status'] = 'available'
+            return $s
+        }
+
+        # Download, check and unpack once per release (.verified marks a complete copy).
+        $versionsDir = Join-DevStorePath $appDir 'versions'
+        $folder = ConvertTo-DevStoreVersionFolder $tag
+        $target = Join-DevStorePath $versionsDir $folder
+        $verified = Join-DevStorePath $target '.verified'
+        if (-not (Test-Path -LiteralPath $verified)) {
+            Write-DevStoreProgress -Root $Root -Text "Downloading $Repo $tag"
+            $dl = Join-DevStorePath $Root 'downloads'
+            if (-not (Test-Path -LiteralPath $dl)) { New-Item -ItemType Directory -Path $dl -Force | Out-Null }
+            $file = Join-DevStorePath $dl "$name-$folder-$([System.IO.Path]::GetFileName([string]$asset.name))"
+            Save-DevStoreAsset -Repo $Repo -AssetId $asset.id -Token $Token -OutFile $file
+            # GitHub's own checksum when it has one, else a <file>.sha256 next to it in the release.
+            $expected = Get-DevStoreAssetSha256 $asset
+            $shaText = $null
+            if ($expected) { $shaText = $expected }
+            else {
+                $shaAsset = @($release.assets | Where-Object { $_ -and $_.name -ieq "$($asset.name).sha256" }) | Select-Object -First 1
+                if ($shaAsset) {
+                    $shaFile = "$file.sha256"
+                    Save-DevStoreAsset -Repo $Repo -AssetId $shaAsset.id -Token $Token -OutFile $shaFile
+                    $shaText = Get-Content -LiteralPath $shaFile -Raw
+                    Remove-Item -LiteralPath $shaFile -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if ($null -ne $shaText) {
+                if (-not (Test-DevStoreHash -File $file -ShaText $shaText)) {
+                    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                    throw "Downloaded $($asset.name) failed its sha256 hash check; will retry next run."
+                }
+            }
+            else {
+                Write-DevStoreLog -Root $Root -App $Repo -Message "$($asset.name) has no published checksum; installed as downloaded"
+            }
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+            New-Item -ItemType Directory -Path $target -Force | Out-Null
+            if ($file -match '\.zip$') { Expand-Archive -LiteralPath $file -DestinationPath $target -Force }
+            else { Copy-Item -LiteralPath $file -Destination (Join-DevStorePath $target ([System.IO.Path]::GetFileName([string]$asset.name))) }
+            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+            Set-Content -LiteralPath $verified -Value $tag
+        }
+        $base = (Get-Item -LiteralPath $target).FullName.TrimEnd('\', '/')
+        $prefix = $base.Length + 1
+        $files = @(Get-ChildItem -LiteralPath $base -Recurse -File -Filter '*.exe' | ForEach-Object {
+                @{ path = $_.FullName.Substring($prefix); size = [long]$_.Length } })
+        $exe = Select-DevStoreStarredExe -Files $files -Repo $Repo
+        if (-not $exe) { throw "No program to open found in $($asset.name) (it may only contain an installer)." }
+
+        if ($waitForUser -and $Mode -eq 'download') {
+            if ($s['status'] -ne 'ready') { Write-DevStoreLog -Root $Root -App $Repo -Message "$tag downloaded, ready to install" }
+            $s['status'] = 'ready'
+            return $s
+        }
+
+        if ($action -eq 'update' -and (Test-DevStoreGuiRunning -AppDir $appDir)) {
+            if ($s['status'] -ne 'pending') { Write-DevStoreLog -Root $Root -App $Repo -Message "$tag waiting for the app to close" }
+            $s['status'] = 'pending'
+            return $s
+        }
+
+        Write-DevStoreProgress -Root $Root -Text "Installing $Repo $tag"
+        $displayName = ($Repo -split '/')[-1]
+        $current = Join-DevStorePath $appDir 'current'
+        $old = $s['installed']
+        $oldFolder = $s['installedFolder']
+        Set-DevStoreJunction -Link $current -Target $target
+        New-DevStoreShortcut -DisplayName $displayName -Target (Join-DevStorePath $current $exe)
+        if ($action -eq 'install') { Write-DevStoreLog -Root $Root -App $Repo -Message "installed $tag" }
+        else { Write-DevStoreLog -Root $Root -App $Repo -Message "updated $old -> $tag" }
+
+        $s['name'] = $name
+        $s['type'] = 'gui'
+        $s['exe'] = $exe
+        $s['displayName'] = $displayName
+        $s['previous'] = $old
+        $s['installed'] = $tag
+        $s['installedFolder'] = $folder
+        $s['restartPending'] = $false
+        $s['status'] = 'ok'
+        $s['lastError'] = $null
+
+        # Keep the current and previous release folders.
+        $existing = @(Get-ChildItem -LiteralPath $versionsDir -Directory | ForEach-Object { $_.Name })
+        foreach ($v in (Get-DevStorePruneList -Versions $existing -Current $folder -Previous $oldFolder)) {
+            Remove-Item -LiteralPath (Join-DevStorePath $versionsDir $v) -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        return $s
+    }
+    catch {
+        $s['status'] = 'error'
+        $s['lastError'] = $_.Exception.Message
+        try { Write-DevStoreLog -Root $Root -App $Repo -Message "error: $($s['lastError'])" } catch { }
+        return $s
+    }
+}
+
 function Get-DevStoreAccessibleRepos {
     # Every repo the token can read (up to 300), most recently pushed first.
     param([string]$Token)
@@ -547,9 +700,9 @@ function Get-DevStoreStarredRepos {
 }
 
 function Update-DevStoreStarred {
-    # Watch only: writes starred.json (each starred repo's newest release, notes
-    # and links) for the window. Never downloads or runs anything from them.
-    param([string]$Root, $Tokens, [switch]$Force)
+    # Writes starred.json (each starred repo's newest release, notes, links and
+    # the Windows file DevStore could install) for the window. Fills $ReleaseCache.
+    param([string]$Root, $Tokens, [switch]$Force, [hashtable]$ReleaseCache = @{})
     $path = Join-DevStorePath $Root 'starred.json'
     $old = Read-DevStoreJson -Path $path -Default @{}
     if (-not (Test-DevStoreStarredDue -Last ([string]$old['updated']) -Force:$Force)) { return }
@@ -565,7 +718,7 @@ function Update-DevStoreStarred {
             if (@($logins | Where-Object { $_ -ieq $owner }).Count) { continue }   # your own apps are already in DevStore
             Write-DevStoreProgress -Root $Root -Text "Looking at starred $($r.full_name)"
             $releases = @()
-            try { $releases = @(Get-DevStoreReleases -Repo ([string]$r.full_name) -Token $main['token']) }
+            try { $releases = @(Get-DevStoreReleases -Repo ([string]$r.full_name) -Token $main['token']); $ReleaseCache[[string]$r.full_name] = $releases }
             catch { Write-DevStoreLog -Root $Root -App ([string]$r.full_name) -Message "starred: couldn't read releases: $($_.Exception.Message)" }
             $repos += ConvertTo-DevStoreStarredEntry -Repo $r -Releases $releases
         }
@@ -695,8 +848,13 @@ function Invoke-DevStoreRequests {
             if ($null -eq $req) { Write-DevStoreLog -Root $Root -Message "ignored an invalid request ($($f.Name))"; continue }
             switch ($req['action']) {
                 'install' {
-                    $Config = Set-DevStoreConfigApp -Config $Config -Repo $req['repo'] -Present $true
+                    $Config = Set-DevStoreConfigApp -Config $Config -Repo $req['repo'] -Present $true -Source ([string]$req['source'])
+                    if ($req['mode']) { $Config = Set-DevStoreConfigUpdates -Config $Config -Repo $req['repo'] -Mode $req['mode'] }
                     Write-DevStoreLog -Root $Root -App $req['repo'] -Message 'install requested'
+                }
+                'set-starred' {
+                    $Config['starredAutoInstall'] = ($req['value'] -eq 'on')
+                    Write-DevStoreLog -Root $Root -Message "newly starred apps: install automatically $($req['value'])"
                 }
                 'remove' {
                     Remove-DevStoreAppCore -Root $Root -Repo $req['repo'] -State $State
@@ -1056,8 +1214,24 @@ function Invoke-DevStoreUpdaterPass {
             $state['catalogError'] = $_.Exception.Message
             Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
         }
-        try { Update-DevStoreStarred -Root $Root -Tokens $tokens -Force:([bool]$requests['check']) }
+        try { Update-DevStoreStarred -Root $Root -Tokens $tokens -Force:([bool]$requests['check']) -ReleaseCache $releaseCache }
         catch { Write-DevStoreLog -Root $Root -Message "starred: $($_.Exception.Message)" }
+        # Newly starred repos with a Windows download, when "install automatically" is on.
+        try {
+            $starredNow = Read-DevStoreJson -Path (Join-DevStorePath $Root 'starred.json') -Default @{}
+            if ($starredNow.ContainsKey('repos') -and -not $starredNow['error']) {
+                $known = $null
+                if ($state.ContainsKey('starredKnown')) { $known = @($state['starredKnown']) }
+                $auto = Get-DevStoreStarredAutoInstall -Repos @($starredNow['repos']) -Known $known -Config $config
+                foreach ($repo in @($auto['install'])) {
+                    $config = Set-DevStoreConfigApp -Config $config -Repo $repo -Present $true -Source 'starred'
+                    Write-DevStoreLog -Root $Root -App $repo -Message 'newly starred: installing automatically'
+                }
+                if (@($auto['install']).Count) { Write-DevStoreJson -Path $configPath -Object $config }
+                $state['starredKnown'] = @($auto['known'])
+            }
+        }
+        catch { Write-DevStoreLog -Root $Root -Message "starred auto-install: $($_.Exception.Message)" }
         foreach ($entry in @($config['apps'])) {
             if ($null -eq $entry -or -not $entry['repo']) { continue }
             $repo = [string]$entry['repo']
@@ -1078,8 +1252,14 @@ function Invoke-DevStoreUpdaterPass {
                 $mode = Get-DevStoreUpdateMode -Config $config -Repo $repo
                 $channel = Get-DevStoreChannel -Config $config -Repo $repo
                 $applyNow = @($requests['apply'] | Where-Object { $_ -ieq $repo }).Count -gt 0
-                $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `
-                    -Releases $cached -Mode $mode -Apply:$applyNow -Channel $channel)
+                if ($entry['source'] -eq 'starred') {
+                    $s = Select-DevStoreHashtable (Update-DevStoreStarredApp -Repo $repo -AppState $prev -Root $Root -Token $token `
+                        -Releases $cached -Mode $mode -Apply:$applyNow)
+                }
+                else {
+                    $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `
+                        -Releases $cached -Mode $mode -Apply:$applyNow -Channel $channel)
+                }
                 if ($null -eq $s) { throw 'The updater returned no result for this app.' }
             }
             catch {
@@ -1140,7 +1320,7 @@ function Invoke-DevStoreUpdaterRun {
 Export-ModuleMember -Function Get-DevStoreRepoTreeEntries, Update-DevStorePlatformShots, Write-DevStoreNasToken, Read-DevStoreNasToken, Get-DevStoreWatchtower, Get-DevStoreNasState,
     Join-DevStorePath, Select-DevStoreHashtable, Get-DevStoreAccessibleRepos, Get-DevStoreLogin,
     Read-DevStoreTokens, Write-DevStoreTokens,
-    Remove-DevStoreAppCore, Get-DevStoreStarredRepos, Update-DevStoreStarred, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
+    Remove-DevStoreAppCore, Get-DevStoreStarredRepos, Update-DevStoreStarredApp, Update-DevStoreStarred, Invoke-DevStoreRequests, Get-DevStoreRepoTree, Save-DevStoreRepoFile, Update-DevStoreCatalog, Update-DevStoreAgentFiles, Initialize-DevStoreLayout, Write-DevStoreLog,
     Get-DevStoreReleases, Save-DevStoreAsset, Set-DevStoreJunction, Get-DevStoreJunctionTarget,
     Test-DevStoreGuiRunning, Test-DevStoreOldProcessRunning, New-DevStoreShortcut, Remove-DevStoreShortcut, Install-DevStoreService,
     Uninstall-DevStoreService, Stop-DevStoreService, Start-DevStoreServiceHealthy, Update-DevStoreApp,

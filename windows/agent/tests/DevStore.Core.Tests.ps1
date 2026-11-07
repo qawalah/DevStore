@@ -497,3 +497,94 @@ Describe 'Select-DevStorePlatformShots' {
         @($p['windows']).Count | Should -Be 0
     }
 }
+
+Describe 'Installing starred apps: picking what to install' {
+    It 'picks the Windows x64 zip or portable exe and never an installer or another OS' {
+        $assets = @('tool-1.2.0-linux-x64.tar.gz', 'tool-1.2.0-macos.zip', 'tool-1.2.0-windows-arm64.zip', 'tool-setup-1.2.0.exe',
+            'tool-1.2.0-win-x86.zip', 'tool-1.2.0-win-x64.zip', 'tool-1.2.0-win-x64.zip.sha256', 'checksums.txt') |
+            ForEach-Object { [pscustomobject]@{ name = $_; size = 1 } }
+        (Select-DevStoreStarredAsset -Assets $assets).name | Should -Be 'tool-1.2.0-win-x64.zip'
+        (Select-DevStoreStarredAsset -Assets @([pscustomobject]@{ name = 'Tool.exe'; size = 1 })).name | Should -Be 'Tool.exe'
+        (Select-DevStoreStarredAsset -Assets @([pscustomobject]@{ name = 'tool-portable-x64.exe'; size = 1 },
+                [pscustomobject]@{ name = 'tool-x86.exe'; size = 1 })).name | Should -Be 'tool-portable-x64.exe'
+    }
+    It 'finds nothing when there is only an installer, a source zip or other platforms' {
+        $assets = @('ToolSetup.exe', 'tool-installer.exe', 'source.zip', 'tool.zip', 'tool.msi', 'tool.dmg', 'tool.AppImage') |
+            ForEach-Object { [pscustomobject]@{ name = $_; size = 1 } }
+        Select-DevStoreStarredAsset -Assets $assets | Should -BeNullOrEmpty
+        Select-DevStoreStarredAsset -Assets @() | Should -BeNullOrEmpty
+    }
+    It 'takes the newest stable release whatever its tag looks like' {
+        $rels = @(
+            [pscustomobject]@{ tag_name = 'nightly'; draft = $false; prerelease = $true; published_at = '2026-11-03T00:00:00Z' },
+            [pscustomobject]@{ tag_name = 'release-2026.10'; draft = $false; prerelease = $false; published_at = '2026-10-01T00:00:00Z' },
+            [pscustomobject]@{ tag_name = 'release-2026.11'; draft = $false; prerelease = $false; published_at = '2026-11-01T00:00:00Z' },
+            [pscustomobject]@{ tag_name = 'next'; draft = $true; prerelease = $false; published_at = '' })
+        (Select-DevStoreStarredRelease -Releases $rels).tag_name | Should -Be 'release-2026.11'
+        Select-DevStoreStarredRelease -Releases @() | Should -BeNullOrEmpty
+    }
+    It 'picks the program named like the repo, skipping uninstallers and helpers' {
+        $files = @(@{ path = 'Uninstall Tool.exe'; size = 9 }, @{ path = 'tool\crashpad_handler.exe'; size = 9 },
+            @{ path = 'tool\helper.exe'; size = 9 }, @{ path = 'tool\My-Tool.exe'; size = 5 }, @{ path = 'tool\other.exe'; size = 8 })
+        Select-DevStoreStarredExe -Files $files -Repo 'someone/my_tool' | Should -Be 'tool\My-Tool.exe'
+    }
+    It 'otherwise picks the top-most, then the biggest program' {
+        $files = @(@{ path = 'bin/small.exe'; size = 1 }, @{ path = 'bin/big.exe'; size = 9 }, @{ path = 'deep/er/huge.exe'; size = 99 })
+        Select-DevStoreStarredExe -Files $files -Repo 'someone/zzz' | Should -Be 'bin\big.exe'
+        Select-DevStoreStarredExe -Files @(@{ path = 'setup.exe'; size = 1 }) -Repo 'a/setup' | Should -BeNullOrEmpty
+    }
+    It 'makes safe folder names for the app and each release' {
+        ConvertTo-DevStoreStarredAppName 'Some.One/My_Tool' | Should -Be 'starred-some-one--my-tool'
+        ConvertTo-DevStoreVersionFolder 'v1.2/beta 3' | Should -Be 'v1.2-beta-3'
+        ConvertTo-DevStoreVersionFolder '..' | Should -Be 'release'
+    }
+    It 'reads GitHub''s sha256 digest for a release file' {
+        $h = 'a' * 64
+        Get-DevStoreAssetSha256 ([pscustomobject]@{ name = 'x.zip'; digest = "sha256:$h" }) | Should -Be $h
+        Get-DevStoreAssetSha256 ([pscustomobject]@{ name = 'x.zip' }) | Should -BeNullOrEmpty
+    }
+    It 'says in starred.json which Windows file it would install' {
+        $repo = [pscustomobject]@{ full_name = 'someone/tool'; description = ''; html_url = 'https://github.com/someone/tool'; owner = $null }
+        $rel = [pscustomobject]@{ tag_name = 'v2'; name = ''; draft = $false; prerelease = $false; published_at = ''; body = ''
+            html_url = 'https://github.com/someone/tool/releases/tag/v2'
+            assets = @([pscustomobject]@{ name = 'tool-win64.zip'; size = 2048; browser_download_url = 'https://github.com/someone/tool/releases/download/v2/tool-win64.zip' }) }
+        (ConvertTo-DevStoreStarredEntry -Repo $repo -Releases @($rel)).latest.windows.name | Should -Be 'tool-win64.zip'
+        $rel.assets = @()
+        (ConvertTo-DevStoreStarredEntry -Repo $repo -Releases @($rel)).latest.windows | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Installing starred apps: requests and auto-install' {
+    It 'accepts an install from Starred and the auto-install switch' {
+        (ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'someone/tool'; source = 'starred' }).source | Should -Be 'starred'
+        (ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'someone/tool'; source = 'elsewhere' }).source | Should -BeNullOrEmpty
+        (ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'someone/tool'; source = 'starred'; mode = 'notify' }).mode | Should -Be 'notify'
+        (ConvertFrom-DevStoreRequest @{ action = 'install'; repo = 'someone/tool'; mode = 'whenever' }).mode | Should -BeNullOrEmpty
+        (ConvertFrom-DevStoreRequest @{ action = 'set-starred'; value = 'on' }).value | Should -Be 'on'
+        ConvertFrom-DevStoreRequest @{ action = 'set-starred'; value = 'maybe' } | Should -BeNullOrEmpty
+    }
+    It 'remembers that a configured app came from Starred' {
+        $c = Set-DevStoreConfigApp -Config @{ apps = @() } -Repo 'someone/tool' -Present $true -Source 'starred'
+        $c.apps[0].source | Should -Be 'starred'
+        (Set-DevStoreConfigApp -Config @{ apps = @() } -Repo 'qawalah/x' -Present $true).apps[0].ContainsKey('source') | Should -BeFalse
+    }
+    It 'installs only repos starred since the last look, with a Windows file, when switched on' {
+        $repos = @(
+            @{ repo = 'a/old'; latest = @{ windows = @{ name = 'old-win.zip' } } },
+            @{ repo = 'b/new'; latest = @{ windows = @{ name = 'new-win.zip' } } },
+            @{ repo = 'c/newlib'; latest = @{ windows = $null } },
+            @{ repo = 'd/norelease'; latest = $null },
+            @{ repo = 'e/added'; latest = @{ windows = @{ name = 'e.exe' } } })
+        $config = @{ apps = @(@{ repo = 'E/Added' }); starredAutoInstall = $true }
+        $r = Get-DevStoreStarredAutoInstall -Repos $repos -Known @('a/old') -Config $config
+        @($r.install) | Should -Be @('b/new')
+        @($r.known).Count | Should -Be 5
+        @((Get-DevStoreStarredAutoInstall -Repos $repos -Known @('a/old') -Config @{ apps = @() }).install).Count | Should -Be 0
+    }
+    It 'installs nothing on the first look, so stars from before are left alone' {
+        $repos = @(@{ repo = 'b/new'; latest = @{ windows = @{ name = 'new-win.zip' } } })
+        $r = Get-DevStoreStarredAutoInstall -Repos $repos -Known $null -Config @{ apps = @(); starredAutoInstall = $true }
+        @($r.install).Count | Should -Be 0
+        @($r.known) | Should -Be @('b/new')
+    }
+}
