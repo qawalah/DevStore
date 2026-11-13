@@ -187,6 +187,9 @@ class Api:
     def check_now(self) -> dict:
         return self._result(actions.check_now, "Checking for updates now.")
 
+    def check_app(self, repo: str) -> dict:
+        return self._result(lambda: actions.check_app(repo), "Checking this app now.")
+
     def open_app(self, repo: str) -> dict:
         app = self._find(repo)
         if app is None:
