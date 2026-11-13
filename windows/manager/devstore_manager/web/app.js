@@ -35,6 +35,7 @@ const ACTIONS = {
   relaunch: { label: "Restart", icon: "restart", cls: "btn-primary", call: (r) => api().relaunch_app(r) },
   close: { label: "Force close", icon: "stop", cls: "btn-quiet", call: (r) => api().close_app(r),
     confirm: (name) => `Force close ${name}?\n\nAnything you haven't saved in it will be lost.` },
+  refresh: { label: "Refresh", icon: "restart", cls: "btn-quiet", call: (r) => api().check_app(r) },
   data: { label: "Data folder", icon: "folder", cls: "btn-quiet", call: (r) => api().open_data(r) },
   remove: { label: "Remove", icon: "trash", cls: "btn-danger", call: (r) => api().remove(r),
     confirm: (name) => `Remove ${name} from this PC?\n\nIts data folder is kept.` },
@@ -475,7 +476,7 @@ async function renderApp(v) {
       <aside><div class="facts">${facts}</div>
         ${onPc ? `<label class="field-label" for="app-mode">Updates on this PC</label>${modeSelect("app-mode", a.updatesIsDefault ? "default" : a.updates, true)}` : ""}
         ${onPc ? channelSelect(a) : ""}
-        <div class="side-actions">${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
+        <div class="side-actions">${onPc ? buttonHtml("refresh", a.repo) : ""}${a.actions.filter((x) => SECONDARY.includes(x)).map((x) => buttonHtml(x, a.repo)).join("")}</div></aside>
     </div>`;
   const ch = $("#app-channel");
   if (ch) ch.addEventListener("change", async (e) => {

@@ -154,6 +154,16 @@ def test_apply_update_and_set_update_modes(root, monkeypatch):
         actions.set_updates(None, "default")
 
 
+def test_check_app_writes_request(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.check_app("qawalah/t")
+    bodies = [json.loads(f.read_text()) for f in sorted((root / "requests").glob("*.json"))]
+    assert bodies == [{"action": "check-app", "repo": "qawalah/t"}]
+    with pytest.raises(ValueError):
+        actions.check_app("not a repo")
+
+
 def test_set_channel_writes_request(root, monkeypatch):
     import json
     monkeypatch.setattr(actions, "start_updater", lambda: True)

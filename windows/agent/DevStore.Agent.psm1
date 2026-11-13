@@ -841,6 +841,7 @@ function Invoke-DevStoreRequests {
     $changed = $false
     $check = $false
     $apply = @()
+    $checkApps = @()
     if (Test-Path -LiteralPath $dir) {
         foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File | Sort-Object LastWriteTime)) {
             $req = ConvertFrom-DevStoreRequest (Read-DevStoreJson -Path $f.FullName -Default $null)
@@ -862,6 +863,7 @@ function Invoke-DevStoreRequests {
                 }
                 'check' { $check = $true }
                 'apply' { $apply += $req['repo'] }
+                'check-app' { $checkApps += $req['repo'] }   # refresh just this app
                 'set-channel' {
                     $Config = Set-DevStoreConfigChannel -Config $Config -Repo $req['repo'] -Channel $req['channel']
                     $apply += $req['repo']
@@ -888,7 +890,7 @@ function Invoke-DevStoreRequests {
             $changed = $true
         }
     }
-    return @{ config = $Config; changed = $changed; check = $check; apply = $apply }
+    return @{ config = $Config; changed = $changed; check = $check; apply = $apply; checkApps = $checkApps }
 }
 
 function Get-DevStoreRepoTreeEntries {
@@ -1237,6 +1239,12 @@ function Invoke-DevStoreUpdaterPass {
             $repo = [string]$entry['repo']
             $prev = $null
             if ($oldApps.ContainsKey($repo)) { $prev = $oldApps[$repo] }
+            # "Refresh" on one app's page: check only that app, leave the others as they were.
+            if (@($requests['checkApps']).Count -gt 0 -and -not $requests['check'] -and
+                @($requests['checkApps'] | Where-Object { $_ -ieq $repo }).Count -eq 0 -and $null -ne $prev) {
+                $newApps[$repo] = $prev
+                continue
+            }
             try {
                 $cached = $null
                 $hit = @($releaseCache.Keys | Where-Object { $_ -ieq $repo }) | Select-Object -First 1

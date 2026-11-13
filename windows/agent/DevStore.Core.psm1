@@ -269,7 +269,7 @@ function ConvertFrom-DevStoreRequest {
         if ($channel -notmatch '^(stable|pr-\d{1,6})$' -or -not (Test-DevStoreRepoName $repo)) { return $null }
         return @{ action = $action; repo = $repo; mode = $null; channel = $channel }
     }
-    if ($action -notin @('install', 'remove', 'apply')) { return $null }
+    if ($action -notin @('install', 'remove', 'apply', 'check-app')) { return $null }
     if (-not (Test-DevStoreRepoName $repo)) { return $null }
     $source = $null
     $mode = $null

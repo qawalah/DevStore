@@ -213,6 +213,15 @@ def check_now() -> None:
         run_elevated("Start-DevStoreCheck.ps1")  # older install: the task isn't startable without admin yet
 
 
+def check_app(repo: str) -> None:
+    """Check one app for a new release now, without checking the others."""
+    if not REPO_RE.match(repo):
+        raise ValueError(f"Can't refresh {repo!r}.")
+    _write_request("check-app", repo)
+    if not start_updater():
+        run_elevated("Start-DevStoreCheck.ps1")
+
+
 def service_action(name: str, action: str) -> None:
     if action not in SERVICE_ACTIONS or not NAME_RE.match(name):
         raise ValueError(f"Can't {action} {name}.")
