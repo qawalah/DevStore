@@ -554,7 +554,55 @@ document.addEventListener("click", (e) => {
   const target = e.target.closest("[data-goto]");
   if (target) go("app", target.dataset.goto);
 });
+// ---------------------------------------------------------------- screenshot viewer
+
+const viewer = { imgs: [], i: 0 };
+
+function openViewer(imgs, i) {
+  viewer.imgs = imgs; viewer.i = i;
+  let el = $("#viewer");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "viewer";
+    el.className = "viewer";
+    el.innerHTML = `<button class="viewer-nav prev" aria-label="Previous">&#8249;</button><img alt=""><button class="viewer-nav next" aria-label="Next">&#8250;</button><button class="viewer-close" aria-label="Close">&times;</button>`;
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".prev")) showViewer(viewer.i - 1);
+      else if (e.target.closest(".next")) showViewer(viewer.i + 1);
+      else if (e.target.tagName !== "IMG") closeViewer();
+    });
+    document.body.appendChild(el);
+  }
+  el.hidden = false;
+  showViewer(i);
+}
+
+function showViewer(i) {
+  const n = viewer.imgs.length;
+  viewer.i = (i + n) % n;
+  const el = $("#viewer");
+  el.querySelector("img").src = viewer.imgs[viewer.i];
+  el.classList.toggle("single", n < 2);
+}
+
+function closeViewer() { const el = $("#viewer"); if (el) el.hidden = true; }
+
+document.addEventListener("click", (e) => {
+  const img = e.target.closest(".shots img");
+  if (!img) return;
+  const all = [...img.parentElement.querySelectorAll("img")];
+  openViewer(all.map((x) => x.src), all.indexOf(img));
+});
+
 document.addEventListener("keydown", (e) => {
+  const vw = $("#viewer");
+  if (vw && !vw.hidden) {
+    if (e.key === "Escape") closeViewer();
+    else if (e.key === "ArrowLeft") showViewer(viewer.i - 1);
+    else if (e.key === "ArrowRight") showViewer(viewer.i + 1);
+    e.preventDefault();
+    return;
+  }
   if (e.key === "Escape" && route.name === "app") go(route.from || "discover");
   if (e.key === "Escape" && route.name === "star") go("starred");
   if (e.key === "Enter" && e.target.matches("[data-goto]")) go("app", e.target.dataset.goto);
