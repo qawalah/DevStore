@@ -124,3 +124,7 @@ How lessons get here: see [README.md](README.md).
   *(SunLighn, 2026-11-14)*
 - **A push to a session branch is not built by CI.** The release workflow runs for `main` and pull requests only,
   so build and test locally before the push that releases. *(SunLighn, 2026-11-14)*
+- **Fetch a map tile and look at it before choosing a tile server.** Free tile servers change terms; CARTO's dark and
+  light maps now return an "API KEY REQUIRED" picture instead of a map, and a build still succeeds. Download one tile
+  with curl, open it, and show the credit the licence asks for. For a dark map without a dark server: invert, rotate
+  hue 180 degrees, dim and tint; a plain inversion looks bad. *(SunLighn, 2026-11-14)*
