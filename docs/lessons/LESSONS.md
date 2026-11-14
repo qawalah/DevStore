@@ -35,6 +35,9 @@ How lessons get here: see [README.md](README.md).
   EQ and made a duplicate.)*
 - **Nothing is saved without the user seeing it happen.** If the app saves something for them, show it once where
   it happened ("saved as Car").
+- **When moving from name links to id links, tie the old records once by name and write the id; never match by
+  name again.** *(AutoTune, 2026-11-14: matching by name at every load would hand an old saved EQ to a new test
+  that took a deleted test's name.)*
 - **After a delete, nothing of the deleted thing stays on screen**: titles, graphs, "in use" labels, widgets,
   the other device.
 
@@ -57,6 +60,7 @@ How lessons get here: see [README.md](README.md).
 - **A key that needs permission does its job once permission is given.** Do not make the user press twice.
 - **A disabled key looks disabled.**
 - **"Suggested" only where there is a choice.** Under the only key on a screen it says nothing.
+- **A destructive key offers Undo or asks.** *(AutoTune, 2026-11-14: "Flat" wiped the EQ in one press.)*
 - **Remove what does nothing useful.** Before adding a key, ask what the user can do with it that they cannot do
   already. *(AutoTune: a "Try it: with EQ / without" section duplicated the EQ's own on/off switch.)*
 - **Simple and Advanced: Advanced only adds.** A key shown in Simple must not move or vanish in Advanced.
@@ -107,6 +111,9 @@ How lessons get here: see [README.md](README.md).
 
 - **Compile and run all tests before pushing to `main`.** The push is the release.
 - **Run one Gradle command at a time**; two at once corrupt the build cache.
+- **Time a wait on screen by the UI's own clock** (its delays or frame time), not the wall clock, so it behaves
+  the same in a test harness and on a device. *(AutoTune, 2026-11-14: "offer the address after 6 s" never fired in
+  the harness.)*
 - **Keep docs true**: when a flow, a key or a default changes, the app's `CLAUDE.md`, flow notes and store
   screenshots change in the same release.
 - **Owner decisions are recorded with their date** in `CLAUDE.md`, so a later audit does not undo them.
