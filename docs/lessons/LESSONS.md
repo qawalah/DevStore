@@ -128,3 +128,8 @@ How lessons get here: see [README.md](README.md).
   light maps now return an "API KEY REQUIRED" picture instead of a map, and a build still succeeds. Download one tile
   with curl, open it, and show the credit the licence asks for. For a dark map without a dark server: invert, rotate
   hue 180 degrees, dim and tint; a plain inversion looks bad. *(SunLighn, 2026-11-14)*
+- **Reuse the shared icons as vector drawables, not hand-drawn copies.** Put the CrossPaths `icons.js` path data
+  straight into `res/drawable/ic_*.xml` (stroke 1.8, round caps, tinted in code); Android reads the SVG arcs as they
+  are. Hand-drawn look-alikes drift from the set. Bundle the shared font in `assets/` and load it with
+  `Typeface.createFromAsset`, which works on every API level. *(SunLighn, 2026-11-14)*
+
