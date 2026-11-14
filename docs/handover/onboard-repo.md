@@ -99,6 +99,9 @@ The image is built on GitHub, published privately to
 
 ## 4. Finish
 1. Keep `HANDOVER.md` in the repo.
+   Add `LESSONS.md` from the DevStore template (`templates/app-repo/LESSONS.md`) if the repo has none, and make
+   sure the repo's `CLAUDE.md` has the template's "Lessons learned" section (DevStore `docs/lessons/README.md`).
+   If `HANDOVER.md` lists mistakes or decisions worth keeping, put them in `LESSONS.md` as lessons.
 2. Commit everything, with a message like "Onboard into DevStore", and push
    to `main`.
 3. Watch the **Release** workflow run (GitHub Actions). If it fails, read

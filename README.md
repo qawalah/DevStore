@@ -32,6 +32,7 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 3. [NAS setup](docs/nas-setup.md): ghcr.io login and Watchtower, for Docker apps.
 4. [Move an app from a Claude chat](docs/handover/README.md): once per app.
 5. [Roadmap](docs/ROADMAP.md): what's planned next.
+6. [Lessons learned](docs/lessons/README.md): rules from past mistakes, for every app.
 
 ## What's in this repo
 | Path | What it is |
@@ -52,6 +53,7 @@ Claude Code ──push──▶ app repo ──GitHub Actions──▶ GitHub Re
 | `scripts/test-docker-steps.sh` | Runs the Docker workflow's smoke-test and cleanup scripts against samples (used by the self-test) |
 | `docs/superpowers/` | Design spec and implementation plan |
 | `docs/design/` | The shared UI design language (from CrossPaths): `DESIGN.md` for Claude to follow, plus reference code. [Read this](docs/design/README.md) to make another app look and move the same |
+| `docs/lessons/` | Lessons learned, shared by every app: `LESSONS.md` for Claude to read before UI, flow or link work, and how app repos capture their own and feed them back. [Read this](docs/lessons/README.md) |
 | `.claude/skills/devstore-onboard/` | Claude Code skill: `/devstore-onboard <app>` creates and sets up an app repo and pushes it |
 | `skills/devstore-handover/` | Chat skill (upload `skills/devstore-handover.zip` to claude.ai): packages a chat app for handover. Re-zip after editing |
 

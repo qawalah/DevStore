@@ -17,3 +17,14 @@ phone through Obtainium.
 - If the Release workflow fails, read its log in the Actions tab and fix it.
 - `HANDOVER.md` (if present) holds history from the original Claude chat.
   Read it before making larger changes.
+
+## Lessons learned
+- **Before changing screens, flow or links between devices**, read the shared lessons:
+  `https://raw.githubusercontent.com/qawalah/devstore/main/docs/lessons/LESSONS.md`
+  (or `docs/lessons/LESSONS.md` in a DevStore checkout). Follow them unless this file says otherwise.
+- **Capture.** When a bug, an audit or the owner's feedback shows something a rule would have prevented, add it to
+  this repo's `LESSONS.md` in the same change: the rule, then what went wrong, with the date.
+- **Feed back.** Mark a lesson that would help other apps with `→ DevStore`. If this session can reach
+  `qawalah/devstore` (`add_repo` with push access), add it to DevStore's `docs/lessons/LESSONS.md` under the right
+  heading with this app's name and date, push, and change the mark to `→ DevStore (sent <date>)`. If it cannot,
+  leave the mark; a DevStore session collects it later.
