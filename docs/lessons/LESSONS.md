@@ -132,4 +132,8 @@ How lessons get here: see [README.md](README.md).
   straight into `res/drawable/ic_*.xml` (stroke 1.8, round caps, tinted in code); Android reads the SVG arcs as they
   are. Hand-drawn look-alikes drift from the set. Bundle the shared font in `assets/` and load it with
   `Typeface.createFromAsset`, which works on every API level. *(SunLighn, 2026-11-14)*
+- **osmdroid's `zoomToBoundingBox` never returns on a map that has no size yet.** Calling it from a result that
+  arrives before the first layout (a background search finishing fast) freezes the app. Guard with
+  `isLayoutOccurred()` and `addOnFirstLayoutListener`. A Robolectric test that pressed through the screen found it.
+  *(SunLighn, 2026-11-14)*
 
