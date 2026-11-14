@@ -136,4 +136,13 @@ How lessons get here: see [README.md](README.md).
   arrives before the first layout (a background search finishing fast) freezes the app. Guard with
   `isLayoutOccurred()` and `addOnFirstLayoutListener`. A Robolectric test that pressed through the screen found it.
   *(SunLighn, 2026-11-14)*
+- **When Gradle says "Could not find x.jar" for a file that downloads fine with curl, it has cached the miss.**
+  Stop the daemon (`./gradlew --stop`), delete `~/.gradle/caches/modules-2/metadata-*`, and run again. Do not loop
+  this: every wipe makes Gradle ask Maven Central for everything again, and after a few rounds it answers 429 Too
+  Many Requests; wait a few minutes then. *(SunLighn, 2026-11-14)*
+- **No emulator in a cloud session (no KVM): check screens with Robolectric.** A test that launches the real
+  activity, presses its keys by text or description, presses Back and saves PNGs (`@GraphicsMode(NATIVE)`) caught
+  layout and Back mistakes without a phone, and a hang no compile would show. It needs `android.useAndroidX=true` and
+  `unitTests.includeAndroidResources = true`. The first run downloads two large Android jars; run the tests again
+  before concluding anything from a "Failed to fetch maven artifact" failure. *(SunLighn, 2026-11-14)*
 
