@@ -117,3 +117,10 @@ How lessons get here: see [README.md](README.md).
 - **Keep docs true**: when a flow, a key or a default changes, the app's `CLAUDE.md`, flow notes and store
   screenshots change in the same release.
 - **Owner decisions are recorded with their date** in `CLAUDE.md`, so a later audit does not undo them.
+- **A cloud Claude session has no Android SDK until it fetches one.** Download the command-line tools zip from
+  `dl.google.com/android/repository/`, unpack to `cmdline-tools/latest`, accept licences, install
+  `platforms;android-35` and `build-tools;35.0.0`, put `sdk.dir=...` in the git-ignored `local.properties`.
+  Gradle downloads through the session proxy fail at random in parallel: use `--max-workers=1` and run it again.
+  *(SunLighn, 2026-11-14)*
+- **A push to a session branch is not built by CI.** The release workflow runs for `main` and pull requests only,
+  so build and test locally before the push that releases. *(SunLighn, 2026-11-14)*
