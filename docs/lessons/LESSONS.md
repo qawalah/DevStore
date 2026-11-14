@@ -56,6 +56,9 @@ How lessons get here: see [README.md](README.md).
 
 - **One sign, one meaning.** ">" opens a page. A down arrow unfolds in place. A key that acts at once has no
   arrow. Put this in the shared components so every screen follows.
+  The same goes for control shapes: tabs, an either/or switch, filter chips and values (a slider, a pinch) must
+  not share a look; keep a small table of shapes in the app's `CLAUDE.md`. *(SunLighn, 2026-11-14: one pill was
+  used for all four, two rows of them stacked.)*
 - **No repeated keys.** The recommended action appears once. Do not list it and also pin it.
 - **A key that needs permission does its job once permission is given.** Do not make the user press twice.
 - **A disabled key looks disabled.**
@@ -65,6 +68,9 @@ How lessons get here: see [README.md](README.md).
   already. *(AutoTune: a "Try it: with EQ / without" section duplicated the EQ's own on/off switch.)*
 - **Simple and Advanced: Advanced only adds.** A key shown in Simple must not move or vanish in Advanced.
 - **No decks inside decks, no folds inside folds.**
+- **A tap never moves work that is already placed.** A tap may place what is missing; moving a placed thing takes
+  a drag, or a press-and-hold that asks. *(SunLighn, 2026-11-14: the third tap on the map silently moved whichever
+  point was nearer.)*
 
 ## Flow
 
@@ -80,6 +86,12 @@ How lessons get here: see [README.md](README.md).
   app restarts.
 - **Lists show only what belongs to the current context.** Connected to one device, list that device's items
   only. *(AutoTune: on the PC the list offered the TV's results.)*
+- **One container, one job.** When a card has grown tabs inside flows inside a scroller, stop adding to it: give
+  the answer a sheet that can be pulled (peek, half, full) and give a view that needs the screen the whole screen.
+  *(SunLighn, 2026-11-14: seven releases each added a feature to one bottom card until the viewfinder was the size
+  of a stamp.)*
+- **The headline is the answer, not the measurement.** The largest text on a result is what the user came for.
+  *(SunLighn, 2026-11-14: the bearing was 24 sp bold; the time the user wanted was a list row.)*
 
 ## Links between devices (phone, TV, PC)
 
@@ -106,6 +118,9 @@ How lessons get here: see [README.md](README.md).
 - **Walk it as someone who has never seen it**: what do they read first, what do they press, where do they stop?
 - **For each key ask**: does the label say what it does, is it needed, is it where you would look?
 - **Write findings in the repo** (an `AUDIT-<date>.md`) and mark each one done with its version.
+- **Render test pictures at a phone's density.** Robolectric draws 1 pixel per dp by default, so a 1080 px
+  picture shows the screen three times too small to judge; add `qualifiers = "w360dp-h780dp-xxhdpi"` to `@Config`.
+  *(SunLighn, 2026-11-14.)*
 
 ## Working with Claude on an app
 
