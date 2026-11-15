@@ -92,6 +92,10 @@ How lessons get here: see [README.md](README.md).
   of a stamp.)*
 - **The headline is the answer, not the measurement.** The largest text on a result is what the user came for.
   *(SunLighn, 2026-11-14: the bearing was 24 sp bold; the time the user wanted was a list row.)*
+- **A list that repeats itself is one row.** Seven days of "Stand 350 m ENE" are one row with a date range.
+  *(SunLighn, 2026-11-15.)*
+- **"Never" is an answer, and it comes with the nearest thing that works.** *(SunLighn, 2026-11-15: "never lines
+  up" was a dead end; it now shows the closest the sun comes and a key that turns the line to meet it.)*
 
 ## Links between devices (phone, TV, PC)
 
@@ -121,6 +125,11 @@ How lessons get here: see [README.md](README.md).
 - **Render test pictures at a phone's density.** Robolectric draws 1 pixel per dp by default, so a 1080 px
   picture shows the screen three times too small to judge; add `qualifiers = "w360dp-h780dp-xxhdpi"` to `@Config`.
   *(SunLighn, 2026-11-14.)*
+- **Test the screens on someone who knows nothing, before the owner does.** Give a small model (Haiku) only the
+  pictures of the real screens and one neutral line on how each was reached; no code, no docs. Ask what each is for,
+  what it would press, and where it would give up. Then tell it what the app does and ask what the app should have
+  said itself. *(SunLighn, 2026-11-15: 2.0.0 looked finished and the tester gave up at the viewfinder: five
+  unlabelled icons and a word, "the line", that was never introduced.)*
 
 ## Working with Claude on an app
 
