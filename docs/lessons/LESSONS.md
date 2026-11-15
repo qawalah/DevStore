@@ -74,6 +74,11 @@ How lessons get here: see [README.md](README.md).
 - **A tap never moves work that is already placed.** A tap may place what is missing; moving a placed thing takes
   a drag, or a press-and-hold that asks. *(SunLighn, 2026-11-14: the third tap on the map silently moved whichever
   point was nearer.)*
+- **A mode the whole app is in is shown, not only written.** Give each mode and each tool a drawn icon (in the
+  middle of its card, the words beneath), let the accent follow the mode, and change the colours with a circle
+  that grows from the finger over a picture of the old screen, never a restart flash. Rewrite the palette object in
+  place; only a theme change needs a restart. *(SunLighn, 2026-11-15: Sun / Moon was a word in a switch and the
+  tools were numbers; the owner asked for icons and for the colours to follow sun and moon.)*
 
 ## Flow
 
@@ -131,6 +136,9 @@ How lessons get here: see [README.md](README.md).
 - **Render test pictures at a phone's density.** Robolectric draws 1 pixel per dp by default, so a 1080 px
   picture shows the screen three times too small to judge; add `qualifiers = "w360dp-h780dp-xxhdpi"` to `@Config`.
   *(SunLighn, 2026-11-14.)*
+- **Robolectric's `idle()` runs a short animation to its end.** To test or picture a transition half way, act on
+  the view without idling (`performClick()`, then look), and end the animation by hand before the next picture.
+  *(SunLighn, 2026-11-15.)*
 - **Test the screens on someone who knows nothing, before the owner does.** Give a small model (Haiku) only the
   pictures of the real screens and one neutral line on how each was reached; no code, no docs. Ask what each is for,
   what it would press, and where it would give up. Then tell it what the app does and ask what the app should have
