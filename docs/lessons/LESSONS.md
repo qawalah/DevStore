@@ -79,6 +79,11 @@ How lessons get here: see [README.md](README.md).
   that grows from the finger over a picture of the old screen, never a restart flash. Rewrite the palette object in
   place; only a theme change needs a restart. *(SunLighn, 2026-11-15: Sun / Moon was a word in a switch and the
   tools were numbers; the owner asked for icons and for the colours to follow sun and moon.)*
+- **A dark screen is not a black screen.** Keep a night scene deep blue, the land clearly darker with a horizon
+  line, a subject a silhouette with a lit edge, the one thing that matters the brightest, and words on a scene as
+  text with a shadow, not dark pills. A view for planning can use a calm planning sky instead of the real one.
+  *(SunLighn, 2026-11-15: sky, land and subject were all a few steps from black and the owner called the
+  viewfinder unreadable.)*
 
 ## Flow
 
@@ -139,6 +144,10 @@ How lessons get here: see [README.md](README.md).
 - **Robolectric's `idle()` runs a short animation to its end.** To test or picture a transition half way, act on
   the view without idling (`performClick()`, then look), and end the animation by hand before the next picture.
   *(SunLighn, 2026-11-15.)*
+- **Size a pager's pages while measuring, never from onSizeChanged, and treat a blank test picture as a bug.**
+  Assert a page's width and its words' size after a real layout. *(SunLighn, 2026-11-15: the tutorial's test
+  picture was empty for weeks and was written off as a test quirk; the owner then saw the same empty pages on the
+  phone.)*
 - **Test the screens on someone who knows nothing, before the owner does.** Give a small model (Haiku) only the
   pictures of the real screens and one neutral line on how each was reached; no code, no docs. Ask what each is for,
   what it would press, and where it would give up. Then tell it what the app does and ask what the app should have
