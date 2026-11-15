@@ -24,6 +24,9 @@ How lessons get here: see [README.md](README.md).
 - **After cancel, return to where the key was pressed**, not to the start of the flow.
 - **Write the Back rule into the app's `CLAUDE.md`** as a small table (where, what Back does) and test it by
   pressing Back on every screen, during every long task, and with every menu and dialog open.
+- **Back walks back through the steps before it leaves the app.** Model the route as steps (tool, step) and let
+  Back pop one; only the first screen leaves. *(SunLighn, 2026-11-15: Back closed overlays and then left, so on the
+  map it felt like "minimise".)*
 
 ## What the app creates, it cleans up
 
@@ -96,6 +99,9 @@ How lessons get here: see [README.md](README.md).
   *(SunLighn, 2026-11-15.)*
 - **"Never" is an answer, and it comes with the nearest thing that works.** *(SunLighn, 2026-11-15: "never lines
   up" was a dead end; it now shows the closest the sun comes and a key that turns the line to meet it.)*
+- **Every route ends on a screen that says what you can do next.** *(SunLighn, 2026-11-15: "Stand here" placed a
+  pin and the owner was left on a map wondering "now what?". Every tool now ends on "Your shot": the moment, then
+  Open the viewfinder, Save, Remind me, Directions.)*
 
 ## Links between devices (phone, TV, PC)
 
@@ -141,3 +147,6 @@ How lessons get here: see [README.md](README.md).
 - **Keep docs true**: when a flow, a key or a default changes, the app's `CLAUDE.md`, flow notes and store
   screenshots change in the same release.
 - **Owner decisions are recorded with their date** in `CLAUDE.md`, so a later audit does not undo them.
+- **Never change the layout from inside a layout pass.** Post the change (`view.post(...)`) and skip a rebuild
+  when nothing changed. *(SunLighn, 2026-11-15: a layout-change listener rebuilt the Home screen while the map was
+  laid out; the new cards kept a size of zero and the test picture was blank.)*
