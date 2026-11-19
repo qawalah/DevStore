@@ -97,14 +97,21 @@ stays for compatibility and returns the first of that list.
 4. **Every remaining group is installed**, with these limits:
    - A `.zip` with no "windows" in its name is dropped when it is in a group
      alone and no `.exe` group exists (same as today: "could be anything").
-   - At most **4** files and **600 MB** total; beyond that DevStore installs
-     nothing and says why (the user can then use the override).
+   - At most **4** files and **600 MB** total (the summed size of the release
+     files as published, i.e. compressed); beyond that DevStore installs
+     nothing and says why (the user can then use the override). On a first
+     install this is an error; on an update the installed version is kept and
+     the same message is shown, as with "no Windows file" today.
 5. A single remaining group gives the same result as today (G5).
 
 **Override.** The override is a list of name *patterns*, each a chosen file
-name with the version replaced by `*` (`relinker-*.exe`, `prx-windows-*.zip`),
-plus optionally the main program's file name. When an override exists, steps
-1-4 are skipped: each pattern must match exactly one asset of the release.
+name with its **version token** replaced by `*` (`relinker-*.exe`,
+`prx-windows-*.zip`), plus optionally the main program's file name. `*` is not
+a glob: it stands for one version token only (the same `v?\d+(\.\d+)+` rule as
+grouping), so `prx-windows-*.zip` matches `prx-windows-v0.1.6.zip` but **not**
+`prx-windows-unpatched-v0.1.6.zip`. When an override exists, steps 1-4 are
+skipped: each pattern must match exactly one asset of the release (zero or
+more than one is an error, below).
 A pattern that matches nothing in a new release is an error shown on the app's
 page ("Your chosen file `x-*.zip` is not in v0.1.6"); the installed version is
 kept, as with a release without a Windows file today.
@@ -117,14 +124,31 @@ kept, as with a release without a Windows file today.
   (`apps\starred-<owner>--<repo>\versions\<tag>\`) and copy `.exe`s into it.
   `.verified` is written once, after all files are in place.
 - A standalone `.exe` whose name is `<stem>-<version>.exe` is saved as
-  `<stem>.exe` so the command is the same after every update.
-  *(My call; mentioned so it can be checked.)*
+  `<stem>.exe` so the command is the same after every update. Only
+  standalone exes are renamed (not exes inside zips), using the same version
+  rule as grouping. *(My call; mentioned so it can be checked.)*
 - The program is picked with `Select-DevStoreStarredExe` over all exes in the
   folder (or the override's main program). `libs\*.dll` and the like are not
   programs; nothing else changes.
+- The zips are unpacked as they are, with no flattening. (AnyPS5's zips hold a
+  top-level `libs\` folder per `tools/package_release.py`, so the libraries
+  land beside the exe. Hoisting a single wrapper folder would break that.)
 - State records `installedFiles` (the chosen file names) next to `installed`.
-  Changing the override reinstalls the **current** release (the chosen files
-  differ from `installedFiles`) without waiting for a new tag.
+- **Apps installed before this version (no `installedFiles`) stay in "legacy
+  mode":** every update picks exactly one file with the old rule, as today, and
+  nothing is reinstalled. They move to the new rules only when the user uses
+  **Choose files...** on them. New installs use the new rules.
+- **Changing the override applies at once, whatever the update setting**, as
+  the user asked for it. It rebuilds the **current** release as a new version
+  folder named `<tag>-<4-char hash of the chosen names>` (new installs use this
+  name from the start; legacy apps keep the plain tag), switched like an
+  update, with the old set as "previous". If the app is running it waits for
+  the app to close ("pending"), as updates do.
+- **Automatic install of repos you star from now on** installs only when the
+  chosen set is a single file, as today. A set of several files needs a click
+  on **Install**. *(My call: keeps "silent" installs to what they always were.)*
+- The override is read from `config.json` by the updater and passed to
+  `Update-DevStoreStarredApp` as a new `-Override` parameter.
 - Update modes (auto / download / notify), waiting for a running app to close,
   keeping current + previous folder, rollbacks of status and the log lines are
   unchanged.
@@ -134,6 +158,9 @@ kept, as with a release without a Windows file today.
 New `Get-DevStorePeSubsystem -Path` reads the exe's PE header
 (`e_lfanew` -> optional header `Subsystem`: 2 = window, 3 = console; anything
 else or an unreadable file = window, today's behaviour).
+- The type comes from the **main program only** (the one exe `exe` and the
+  shortcut point at). An app has one main program, even if the set holds
+  several exes.
 - **Window** -> unchanged (`type = 'gui'`, Start-menu shortcut to the exe).
 - **Console** -> `type = 'cli'`. The Start-menu shortcut is named
   `<Name> (command line)` and opens PowerShell (`-NoExit`) in the app's
@@ -157,7 +184,9 @@ else or an unreadable file = window, today's behaviour).
   automatic**. It sends a new `set-files` request (`repo`, `patterns`,
   `main`, or `clear: true`) through the existing requests folder; the updater
   validates it (`ConvertFrom-DevStoreRequest`) and stores it in `config.json`
-  on the app's entry (`files`, `main`).
+  under a top-level `starredFiles` map keyed by repo (`patterns`, `main`), not
+  on the app's entry. That way an override can be set before the app is
+  installed, without creating a half-installed app.
 - The Installed page and app page show "Command-line tool" for `cli` apps,
   with **Open terminal** in place of **Open** (it runs the same shortcut).
 - `docs/windows-setup.md` ("Starred repos") is updated to describe the set,
