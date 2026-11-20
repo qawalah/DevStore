@@ -90,7 +90,8 @@ function stateHtml(st, short = false) {
 function buttonHtml(action, repo, opts = {}) {
   const a = ACTIONS[action];
   const app = view && view.apps.find((x) => x.repo === repo);
-  const label = action === "update" && app && app.status.text.startsWith("Update downloaded") ? "Install update" : a.label;
+  let label = action === "update" && app && app.status.text.startsWith("Update downloaded") ? "Install update" : a.label;
+  if (action === "open" && app && app.appType === "cli") label = "Open terminal";
   const text = opts.compact ? "" : `<span>${label}</span>`;
   const title = opts.compact ? ` title="${label}" aria-label="${label}"` : "";
   return `<button class="btn ${a.cls}" data-action="${action}" data-repo="${esc(repo)}"${title}>${ICONS[a.icon]}${text}</button>`;
@@ -133,7 +134,7 @@ function render() {
   // Refreshes run every few seconds: keep the page as it is while someone types in it,
   // and when nothing it shows has changed (keeps scroll positions too).
   const { updater, ...shown } = view;
-  const key = JSON.stringify([route, search, shown]);
+  const key = JSON.stringify([route, search, shown, choose]);
   const a = document.activeElement;
   const typing = a && v.contains(a) && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName);
   if (typing || key === lastPage) return;
@@ -366,21 +367,112 @@ async function renderStarred(v) {
     </div>`).join("")}</div>`;
 }
 
+// ---------------------------------------------------------------- choosing which files to install
+
+let choose = null;      // { repo, picked: [file names], main } while the Choose files panel is open
+let starItem = null;    // the starred item the page shows, for redrawing the panel alone
+
+// 'relinker-v0.1.5.exe' -> 'relinker-*.exe': the version becomes *, so the choice carries over to the next release.
+function patternOf(name) {
+  const re = /(?<![A-Za-z0-9])(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)/g;
+  let last = null, m;
+  while ((m = re.exec(name))) last = m;
+  return last ? name.slice(0, last.index) + "*" + name.slice(last.index + last[0].length) : name;
+}
+
+const installable = (name) => /\.(zip|exe)$/i.test(name);
+
+function chooseButton(i) {
+  if (!i.latest || !i.latest.assets.length) return "";
+  return `<button class="btn btn-quiet" data-choose="${esc(i.repo)}"><span>Choose files…</span></button>`;
+}
+
+function choosePanelHtml(i) {
+  if (!choose || choose.repo !== i.repo || !i.latest) return "";
+  const exes = choose.picked.filter((n) => /\.exe$/i.test(n));
+  const count = choose.picked.length;
+  const ok = count >= 1 && count <= 4;
+  const rows = i.latest.assets.map((a) => {
+    const can = installable(a.name);
+    return `<label class="pick${can ? "" : " off"}"><input type="checkbox" data-pick="${esc(a.name)}"${choose.picked.includes(a.name) ? " checked" : ""}${can ? "" : " disabled"}>
+      <span><span class="row-name">${esc(a.name)}</span><span class="row-sub">${fileSize(a.size)}${can ? "" : " · can't be installed (only .zip and .exe)"}</span></span></label>`;
+  }).join("");
+  const main = exes.length > 1
+    ? `<label class="field-label" for="choose-main">Main program</label><select class="select" id="choose-main">
+        <option value="">Pick it for me</option>${exes.map((n) => `<option value="${esc(n)}"${choose.main === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>` : "";
+  return `<div class="choose"><h3>Choose files</h3>
+    <p class="muted">Tick the files DevStore should install together (up to 4). The same choice is used for every new release.</p>
+    <div class="picks">${rows}</div>${main}
+    <p class="muted hint">${ok ? `${count} file${count === 1 ? "" : "s"} chosen.` : count ? "That's more than 4 files. Untick some." : "Tick at least one file."}</p>
+    <div class="detail-actions" style="margin-top:12px"><button class="btn btn-primary" data-choose-apply="${esc(i.repo)}"${ok ? "" : " disabled"}><span>Use these files</span></button>
+      ${i.override ? `<button class="btn btn-quiet" data-choose-auto="${esc(i.repo)}"><span>Back to automatic</span></button>` : ""}
+      <button class="btn btn-quiet" data-choose-cancel="1"><span>Cancel</span></button></div></div>`;
+}
+
+function drawChoose(keepFocus) {
+  const box = $("#choose-panel");
+  if (!box || !starItem) return;
+  box.innerHTML = choosePanelHtml(starItem);
+  if (keepFocus) { const el = box.querySelector(`[data-pick="${CSS.escape(keepFocus)}"]`); if (el) el.focus(); }
+}
+
+document.addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-choose]");
+  if (open) {
+    const i = starItem;
+    if (!i) return;
+    choose = { repo: i.repo, picked: i.files.map((f) => f.name), main: "" };
+    drawChoose();
+    return;
+  }
+  if (e.target.closest("[data-choose-cancel]")) { choose = null; drawChoose(); return; }
+  const auto = e.target.closest("[data-choose-auto]");
+  const apply = e.target.closest("[data-choose-apply]");
+  if (!auto && !apply) return;
+  e.stopPropagation();
+  const repo = (auto || apply).dataset.chooseAuto || (auto || apply).dataset.chooseApply;
+  const res = auto ? await api().set_starred_files(repo, [], "", true)
+    : await api().set_starred_files(repo, choose.picked.map(patternOf), choose.main ? patternOf(choose.main) : "", false);
+  toast(res.message, res.ok);
+  if (res.ok) choose = null;
+  await load();
+});
+
+document.addEventListener("change", (e) => {
+  if (!choose) return;
+  const pick = e.target.closest("[data-pick]");
+  if (pick) {
+    const name = pick.dataset.pick;
+    choose.picked = pick.checked ? [...choose.picked, name] : choose.picked.filter((n) => n !== name);
+    if (choose.main && !choose.picked.includes(choose.main)) choose.main = "";
+    drawChoose(name);
+  }
+  if (e.target.id === "choose-main") choose.main = e.target.value;
+});
+
 function starInstallHtml(i) {
   const r = i.latest;
   if (i.app) {
     return `<section class="star-install"><h2>On this PC</h2>
       <p>${stateHtml(i.app.status)} <span class="muted">· ${esc(ver(i.app.installedVersion) || "installing")}</span></p>
-      <div class="detail-actions">${starButton(i)}<button class="btn btn-quiet" data-goto="${esc(i.app.repo)}"><span>Manage updates</span></button></div></section>`;
+      <div class="detail-actions">${starButton(i)}<button class="btn btn-quiet" data-goto="${esc(i.app.repo)}"><span>Manage updates</span></button>${chooseButton(i)}</div>
+      <div id="choose-panel">${choosePanelHtml(i)}</div></section>`;
   }
   if (!r) return "";
   if (!i.installable) {
+    const why = i.filesError
+      ? esc(i.filesError)
+      : `This release has no Windows download DevStore can install and keep updated (it needs a <code>.zip</code> for Windows or a portable <code>.exe</code>; installers aren't supported). You can still download its files in your browser below.`;
     return `<section class="star-install"><h2>On this PC</h2>
-      <p class="muted">This release has no Windows download DevStore can install and keep updated (it needs a <code>.zip</code> for Windows or a portable <code>.exe</code>; installers aren't supported). You can still download its files in your browser below.</p></section>`;
+      <p class="muted">${why}</p>${r.assets.length ? `<div class="detail-actions">${chooseButton(i)}</div>` : ""}
+      <div id="choose-panel">${choosePanelHtml(i)}</div></section>`;
   }
-  const w = r.windows;
+  const names = i.files.map((f) => `<strong>${esc(f.name)}</strong> <span class="muted">(${fileSize(f.size)})</span>`);
+  const what = names.length > 1 ? `these ${names.length} files together: ${names.join(", ")}` : names[0];
   return `<section class="star-install"><h2>Install on this PC</h2>
-    <p>DevStore installs <strong>${esc(w.name)}</strong> <span class="muted">(${fileSize(w.size)})</span>, adds it to the Start menu, and keeps it updated from new releases.</p>
+    <p>DevStore installs ${what}, adds it to the Start menu, and keeps it updated from new releases.${i.override ? ' <span class="muted">These are the files you chose.</span>' : ""}</p>
+    <div class="detail-actions">${chooseButton(i)}</div>
+    <div id="choose-panel">${choosePanelHtml(i)}</div>
     <label class="field-label" for="star-mode">When there's a new release</label>${modeSelect("star-mode", view.settings.defaultUpdates, false)}
     <div class="detail-actions" style="margin-top:12px">${buttonHtml("installStarred", i.repo)}</div>
     <p class="muted hint">${TRUST_NOTE}</p></section>`;
@@ -391,6 +483,8 @@ async function renderStar(v) {
   const i = st.items.find((x) => x.repo === route.repo);
   if (!i) { go("starred"); return; }
   if (i.isNew) api().mark_seen(i.repo);
+  starItem = i;
+  if (choose && choose.repo !== i.repo) choose = null;
   const r = i.latest;
   v.innerHTML = `
     <button class="link detail-back" data-nav="starred">${ICONS.back}<span>Back</span></button>
