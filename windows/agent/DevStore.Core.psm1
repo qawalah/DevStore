@@ -255,6 +255,20 @@ function ConvertFrom-DevStoreRequest {
         if ($value -notin @('on', 'off')) { return $null }
         return @{ action = $action; repo = $null; mode = $null; value = $value }
     }
+    if ($action -eq 'set-files') {
+        # The files to install from a starred repo's release: name patterns (version = *) and the main program.
+        $repo = [string]$Request['repo']
+        if (-not (Test-DevStoreRepoName $repo)) { return $null }
+        if ($Request['clear'] -eq $true) { return @{ action = $action; repo = $repo; mode = $null; patterns = @(); main = ''; clear = $true } }
+        $patterns = @(@($Request['patterns']) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+        if ($patterns.Count -lt 1 -or $patterns.Count -gt $script:StarredMaxFiles) { return $null }
+        foreach ($p in $patterns) {
+            if ($p -notmatch '^[A-Za-z0-9._+*-]{1,120}\.(zip|exe)$' -or $p.Contains('..')) { return $null }
+        }
+        $main = [string]$Request['main']
+        if ($main -and ($main -notmatch '^[A-Za-z0-9._+-]{1,120}\.exe$' -or $main.Contains('..'))) { return $null }
+        return @{ action = $action; repo = $repo; mode = $null; patterns = $patterns; main = $main; clear = $false }
+    }
     $repo = [string]$Request['repo']
     if ($action -eq 'set-updates') {
         $mode = [string]$Request['mode']
@@ -519,11 +533,61 @@ function ConvertTo-DevStoreStandaloneExeName {
     return "$clean.exe"
 }
 
+function ConvertTo-DevStoreAssetPattern {
+    # 'relinker-v0.1.5.exe' -> 'relinker-*.exe': the version becomes *, so the choice carries to the next release.
+    param([string]$Name, [string]$Tag)
+    $ms = [regex]::Matches($Name, $script:VersionTokenPattern)
+    if ($ms.Count -gt 0) {
+        $m = $ms[$ms.Count - 1]
+        return $Name.Substring(0, $m.Index) + '*' + $Name.Substring($m.Index + $m.Length)
+    }
+    return $Name
+}
+
+function Test-DevStoreAssetPattern {
+    # True when $Name is $Pattern, with * standing for exactly one version token (not a glob).
+    param([string]$Pattern, [string]$Name)
+    $rx = '^' + ([regex]::Escape($Pattern) -replace '\\\*', "(?:$($script:VersionTokenPattern))") + '$'
+    return [regex]::IsMatch($Name, $rx, 'IgnoreCase')
+}
+
+function Set-DevStoreStarredFiles {
+    # The files the user chose for a starred repo (config.starredFiles[repo]); -Clear goes back to automatic.
+    param([hashtable]$Config, [string]$Repo, [string[]]$Patterns = @(), [string]$Main = '', [bool]$Clear = $false)
+    $map = @{}
+    if ($Config.ContainsKey('starredFiles') -and $Config['starredFiles'] -is [hashtable]) {
+        foreach ($k in $Config['starredFiles'].Keys) { if ($k -ine $Repo) { $map[$k] = $Config['starredFiles'][$k] } }
+    }
+    if (-not $Clear) { $map[$Repo] = @{ patterns = @($Patterns); main = $Main } }
+    $Config['starredFiles'] = $map
+    return $Config
+}
+
+function Get-DevStoreStarredFiles {
+    # @{ patterns; main } the user chose for this repo, or $null (automatic).
+    param([hashtable]$Config, [string]$Repo)
+    if (-not $Config.ContainsKey('starredFiles') -or $Config['starredFiles'] -isnot [hashtable]) { return $null }
+    foreach ($k in $Config['starredFiles'].Keys) {
+        if ($k -ieq $Repo) { return $Config['starredFiles'][$k] }
+    }
+    return $null
+}
+
 function Select-DevStoreStarredAssets {
     # The Windows files of a release to install together. Returns
     # @{ assets = @(...); error = <string or $null> }; an empty set without an error
     # means the release has nothing DevStore can install.
     param($Assets, [string]$Tag, $Override = $null)
+    if ($null -ne $Override) {
+        $picked = @()
+        foreach ($pattern in @($Override['patterns'])) {
+            $hits = @(@($Assets) | Where-Object { $_ -and $_.name -and (Test-DevStoreAssetPattern -Pattern ([string]$pattern) -Name ([string]$_.name)) })
+            if ($hits.Count -eq 0) { return @{ assets = @(); error = "Your chosen file $pattern is not in $Tag." } }
+            if ($hits.Count -gt 1) { return @{ assets = @(); error = "Your chosen file $pattern matches more than one file in $Tag." } }
+            $picked += $hits[0]
+        }
+        return @{ assets = $picked; error = $null }
+    }
     $groups = @{}
     foreach ($a in @($Assets)) {
         if ($null -eq $a -or -not $a.name) { continue }
@@ -783,4 +847,5 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Get-DevStoreAndroidRelease, Select-DevStorePlatformShots,
     Select-DevStoreStarredRelease, Get-DevStoreStarredAssetScore, Select-DevStoreStarredAsset, Select-DevStoreStarredExe,
     Get-DevStoreAssetBaseName, ConvertTo-DevStoreStandaloneExeName, Select-DevStoreStarredAssets,
+    ConvertTo-DevStoreAssetPattern, Test-DevStoreAssetPattern, Set-DevStoreStarredFiles, Get-DevStoreStarredFiles,
     ConvertTo-DevStoreStarredAppName, ConvertTo-DevStoreVersionFolder, Get-DevStoreAssetSha256, Get-DevStoreStarredAutoInstall

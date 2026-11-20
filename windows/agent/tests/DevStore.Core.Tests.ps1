@@ -650,3 +650,69 @@ Describe 'Starred file names' {
         ConvertTo-DevStoreStandaloneExeName -Name 'tool.exe' -Tag 'v0.1.5' | Should -Be 'tool.exe'
     }
 }
+
+Describe 'Starred overrides' {
+    BeforeAll {
+        function New-Asset2($Name, $Size = 1MB) { [pscustomobject]@{ name = $Name; size = [long]$Size; id = 1 } }
+    }
+    It 'matches only the version token for *, ignoring case' {
+        Test-DevStoreAssetPattern -Pattern 'prx-windows-*.zip' -Name 'prx-windows-v0.1.6.zip' | Should -BeTrue
+        Test-DevStoreAssetPattern -Pattern 'prx-windows-*.zip' -Name 'PRX-Windows-v0.1.6.ZIP' | Should -BeTrue
+        Test-DevStoreAssetPattern -Pattern 'prx-windows-*.zip' -Name 'prx-windows-unpatched-v0.1.6.zip' | Should -BeFalse
+        Test-DevStoreAssetPattern -Pattern 'tool.exe' -Name 'tool.exe' | Should -BeTrue
+        Test-DevStoreAssetPattern -Pattern 'tool.exe' -Name 'toolxexe' | Should -BeFalse
+    }
+    It 'turns a chosen name into a pattern' {
+        ConvertTo-DevStoreAssetPattern -Name 'relinker-v0.1.5.exe' -Tag 'v0.1.5' | Should -Be 'relinker-*.exe'
+        ConvertTo-DevStoreAssetPattern -Name 'tool.exe' -Tag 'v0.1.5' | Should -Be 'tool.exe'
+    }
+    It 'keeps an override across a version bump' {
+        $assets = @((New-Asset2 'relinker-v0.1.6.exe'), (New-Asset2 'prx-windows-v0.1.6.zip'), (New-Asset2 'prx-windows-unpatched-v0.1.6.zip'))
+        $ov = @{ patterns = @('relinker-*.exe', 'prx-windows-*.zip'); main = '' }
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v0.1.6' -Override $ov
+        $r.error | Should -BeNullOrEmpty
+        @($r.assets | ForEach-Object { $_.name }) | Should -Be @('relinker-v0.1.6.exe', 'prx-windows-v0.1.6.zip')
+    }
+    It 'reports a pattern that matches nothing or more than one file' {
+        $assets = @((New-Asset2 'a-v1.0.zip'), (New-Asset2 'a-v1.1.zip'))
+        $none = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1.1' -Override @{ patterns = @('x-*.zip') }
+        @($none.assets).Count | Should -Be 0
+        $none.error | Should -Be 'Your chosen file x-*.zip is not in v1.1.'
+        $many = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1.1' -Override @{ patterns = @('a-*.zip') }
+        @($many.assets).Count | Should -Be 0
+        $many.error | Should -Be 'Your chosen file a-*.zip matches more than one file in v1.1.'
+    }
+    It 'stores, reads and clears an override whatever the repo case' {
+        $c = Set-DevStoreStarredFiles -Config @{ apps = @() } -Repo 'Boykopovar/AnyPS5' -Patterns @('relinker-*.exe') -Main 'relinker.exe'
+        $o = Get-DevStoreStarredFiles -Config $c -Repo 'boykopovar/anyps5'
+        @($o.patterns) | Should -Be @('relinker-*.exe')
+        $o.main | Should -Be 'relinker.exe'
+        $c = Set-DevStoreStarredFiles -Config $c -Repo 'other/tool' -Patterns @('t.exe')
+        $c = Set-DevStoreStarredFiles -Config $c -Repo 'BOYKOPOVAR/anyps5' -Clear $true
+        Get-DevStoreStarredFiles -Config $c -Repo 'boykopovar/anyps5' | Should -BeNullOrEmpty
+        @((Get-DevStoreStarredFiles -Config $c -Repo 'other/tool').patterns) | Should -Be @('t.exe')
+        Get-DevStoreStarredFiles -Config @{} -Repo 'a/b' | Should -BeNullOrEmpty
+    }
+    It 'accepts a valid set-files request' {
+        $r = ConvertFrom-DevStoreRequest @{ action = 'set-files'; repo = 'boykopovar/AnyPS5'; patterns = @('relinker-*.exe', 'prx-windows-*.zip'); main = 'relinker.exe' }
+        $r.action | Should -Be 'set-files'
+        @($r.patterns) | Should -Be @('relinker-*.exe', 'prx-windows-*.zip')
+        $r.main | Should -Be 'relinker.exe'
+        $r.clear | Should -BeFalse
+        $c = ConvertFrom-DevStoreRequest @{ action = 'set-files'; repo = 'a/b'; clear = $true }
+        $c.clear | Should -BeTrue
+    }
+    It 'rejects bad set-files requests' {
+        $bad = @(
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @() },
+            @{ action = 'set-files'; repo = 'a/b' },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('a*.zip', 'b*.zip', 'c*.zip', 'd*.zip', 'e*.zip') },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('../x.zip') },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('sub/x.zip') },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('x;y.exe') },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('x.msi') },
+            @{ action = 'set-files'; repo = 'a/b'; patterns = @('x.zip'); main = 'x.zip' },
+            @{ action = 'set-files'; repo = 'not a repo'; patterns = @('x.zip') })
+        foreach ($b in $bad) { ConvertFrom-DevStoreRequest $b | Should -BeNullOrEmpty }
+    }
+}
