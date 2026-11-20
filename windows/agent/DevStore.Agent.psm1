@@ -753,7 +753,7 @@ function Get-DevStoreStarredRepos {
 function Update-DevStoreStarred {
     # Writes starred.json (each starred repo's newest release, notes, links and
     # the Windows file DevStore could install) for the window. Fills $ReleaseCache.
-    param([string]$Root, $Tokens, [switch]$Force, [hashtable]$ReleaseCache = @{})
+    param([string]$Root, $Tokens, [switch]$Force, [hashtable]$ReleaseCache = @{}, [hashtable]$Config = @{})
     $path = Join-DevStorePath $Root 'starred.json'
     $old = Read-DevStoreJson -Path $path -Default @{}
     if (-not (Test-DevStoreStarredDue -Last ([string]$old['updated']) -Force:$Force)) { return }
@@ -771,7 +771,7 @@ function Update-DevStoreStarred {
             $releases = @()
             try { $releases = @(Get-DevStoreReleases -Repo ([string]$r.full_name) -Token $main['token']); $ReleaseCache[[string]$r.full_name] = $releases }
             catch { Write-DevStoreLog -Root $Root -App ([string]$r.full_name) -Message "starred: couldn't read releases: $($_.Exception.Message)" }
-            $repos += ConvertTo-DevStoreStarredEntry -Repo $r -Releases $releases
+            $repos += ConvertTo-DevStoreStarredEntry -Repo $r -Releases $releases -Override (Get-DevStoreStarredFiles -Config $Config -Repo ([string]$r.full_name))
         }
         Write-DevStoreJson -Path $path -Object @{ updated = Get-DevStoreTimestamp; error = $null; repos = $repos }
     }
@@ -920,6 +920,13 @@ function Invoke-DevStoreRequests {
                     $Config = Set-DevStoreConfigChannel -Config $Config -Repo $req['repo'] -Channel $req['channel']
                     $apply += $req['repo']
                     Write-DevStoreLog -Root $Root -App $req['repo'] -Message "now following $($req['channel'] -replace '^pr-', 'test builds of PR #')"
+                }
+                'set-files' {
+                    $Config = Set-DevStoreStarredFiles -Config $Config -Repo $req['repo'] -Patterns @($req['patterns']) -Main ([string]$req['main']) -Clear ([bool]$req['clear'])
+                    $apply += $req['repo']   # the user's own choice: applies now, whatever the update setting
+                    $check = $true           # and the starred list shows the new files at once
+                    if ($req['clear']) { Write-DevStoreLog -Root $Root -App $req['repo'] -Message 'back to automatic files' }
+                    else { Write-DevStoreLog -Root $Root -App $req['repo'] -Message 'now using your chosen files' }
                 }
                 'set-nas' {
                     $Config = Set-DevStoreConfigNas -Config $Config -Url $req['url']
@@ -1268,7 +1275,7 @@ function Invoke-DevStoreUpdaterPass {
             $state['catalogError'] = $_.Exception.Message
             Write-DevStoreLog -Root $Root -Message "couldn't list your GitHub repos: $($_.Exception.Message)"
         }
-        try { Update-DevStoreStarred -Root $Root -Tokens $tokens -Force:([bool]$requests['check']) -ReleaseCache $releaseCache }
+        try { Update-DevStoreStarred -Root $Root -Tokens $tokens -Force:([bool]$requests['check']) -ReleaseCache $releaseCache -Config $config }
         catch { Write-DevStoreLog -Root $Root -Message "starred: $($_.Exception.Message)" }
         # Newly starred repos with a Windows download, when "install automatically" is on.
         try {
@@ -1314,7 +1321,7 @@ function Invoke-DevStoreUpdaterPass {
                 $applyNow = @($requests['apply'] | Where-Object { $_ -ieq $repo }).Count -gt 0
                 if ($entry['source'] -eq 'starred') {
                     $s = Select-DevStoreHashtable (Update-DevStoreStarredApp -Repo $repo -AppState $prev -Root $Root -Token $token `
-                        -Releases $cached -Mode $mode -Apply:$applyNow)
+                        -Releases $cached -Mode $mode -Apply:$applyNow -Override (Get-DevStoreStarredFiles -Config $config -Repo $repo))
                 }
                 else {
                     $s = Select-DevStoreHashtable (Update-DevStoreApp -Repo $repo -AppState $prev -Root $Root -Token $appToken `

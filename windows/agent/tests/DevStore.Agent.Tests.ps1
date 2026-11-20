@@ -1259,3 +1259,53 @@ Describe 'Update-DevStoreStarredApp: sets of files' {
         (Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel) -Override $bad).status | Should -Be 'error'
     }
 }
+
+Describe 'Starred file choices in the updater' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'requests') -Force | Out-Null
+    }
+    It 'stores a set-files request, applies it right away and refreshes the starred list' {
+        Write-DevStoreJson -Path (Join-Path $Root 'requests\1.json') -Object @{ action = 'set-files'; repo = 'someone/tool'; patterns = @('a-*.exe', 'b-*.zip'); main = 'a.exe' }
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @(@{ repo = 'someone/tool'; source = 'starred' }) }
+        @($result.config.starredFiles['someone/tool'].patterns) | Should -Be @('a-*.exe', 'b-*.zip')
+        $result.config.starredFiles['someone/tool'].main | Should -Be 'a.exe'
+        @($result.apply) | Should -Be @('someone/tool')
+        $result.check | Should -BeTrue
+        $result.changed | Should -BeTrue
+    }
+    It 'clears the choice with a clear request' {
+        $cfg = Set-DevStoreStarredFiles -Config @{ apps = @() } -Repo 'someone/tool' -Patterns @('a-*.exe')
+        Write-DevStoreJson -Path (Join-Path $Root 'requests\1.json') -Object @{ action = 'set-files'; repo = 'someone/tool'; clear = $true }
+        $result = Invoke-DevStoreRequests -Root $Root -Config $cfg
+        Get-DevStoreStarredFiles -Config $result.config -Repo 'someone/tool' | Should -BeNullOrEmpty
+    }
+    It 'ignores a bad set-files request' {
+        Write-DevStoreJson -Path (Join-Path $Root 'requests\1.json') -Object @{ action = 'set-files'; repo = 'someone/tool'; patterns = @('../evil.exe') }
+        $result = Invoke-DevStoreRequests -Root $Root -Config @{ apps = @() }
+        Get-DevStoreStarredFiles -Config $result.config -Repo 'someone/tool' | Should -BeNullOrEmpty
+        @($result.apply).Count | Should -Be 0
+    }
+}
+
+Describe 'Starred file choices reach the install' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+        Mock -ModuleName DevStore.Agent Read-DevStoreTokens { @(@{ login = 'qawalah'; token = 'token' }) }
+        Mock -ModuleName DevStore.Agent Initialize-DevStoreLayout {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreCatalog {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreStarred {}
+        Mock -ModuleName DevStore.Agent Update-DevStoreAgentFiles { $false }
+        Mock -ModuleName DevStore.Agent Update-DevStoreStarredApp { @{ status = 'ok'; installed = 'v1'; source = 'starred'; bad = @() } }
+    }
+    It 'hands the saved choice to the install and the config to the starred list' {
+        Write-DevStoreJson -Path (Join-Path $Root 'config.json') -Object @{
+            apps = @(@{ repo = 'someone/tool'; source = 'starred' }, @{ repo = 'other/plain'; source = 'starred' })
+            starredFiles = @{ 'someone/tool' = @{ patterns = @('a-*.zip'); main = '' } } }
+        Invoke-DevStoreUpdaterRun -Root $Root
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarredApp -Times 1 -Exactly -ParameterFilter { $Repo -eq 'someone/tool' -and $Override -and @($Override.patterns)[0] -eq 'a-*.zip' }
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarredApp -Times 1 -Exactly -ParameterFilter { $Repo -eq 'other/plain' -and $null -eq $Override }
+        Should -Invoke -ModuleName DevStore.Agent Update-DevStoreStarred -Times 1 -Exactly -ParameterFilter { $Config -and $Config.starredFiles }
+    }
+}
