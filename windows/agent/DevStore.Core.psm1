@@ -420,7 +420,7 @@ function Get-DevStoreGitHubUrl {
 function ConvertTo-DevStoreStarredEntry {
     # A starred repo and its newest stable release, as plain data for the window.
     # Nothing is downloaded here: installing is Update-DevStoreStarredApp's job.
-    param($Repo, $Releases)
+    param($Repo, $Releases, $Override = $null)
     $name = [string]$Repo.full_name
     $repoUrl = Get-DevStoreGitHubUrl -Url ([string]$Repo.html_url) -Fallback "https://github.com/$name"
     $avatar = $null
@@ -443,8 +443,19 @@ function ConvertTo-DevStoreStarredEntry {
             tag = [string]$rel.tag_name; title = $title; publishedAt = [string]$rel.published_at; notes = $notes
             url = (Get-DevStoreGitHubUrl -Url ([string]$rel.html_url) -Fallback "$repoUrl/releases"); assets = $assets
         }
-        # The file DevStore would install on this PC, if the release has one.
-        $win = Select-DevStoreStarredAsset -Assets $rel.assets
+        # The files DevStore would install on this PC (a set, or the user's own choice), if the release has any.
+        $set = Select-DevStoreStarredAssets -Assets $rel.assets -Tag ([string]$rel.tag_name) -Override $Override
+        $picked = @($set['assets'])
+        $latest['windowsFiles'] = @($picked | ForEach-Object { @{ name = [string]$_.name; size = [long]$_.size } })
+        $latest['windowsOverride'] = ($null -ne $Override)
+        $latest['windowsError'] = $set['error']
+        # 'windows' stays the one file the old single pick would take, when it is in the set (else the first).
+        $win = $null
+        if ($picked.Count) {
+            $old = Select-DevStoreStarredAsset -Assets $rel.assets
+            $win = @($picked | Where-Object { $old -and $_.name -eq $old.name }) | Select-Object -First 1
+            if (-not $win) { $win = $picked[0] }
+        }
         if ($win) { $latest['windows'] = @{ name = [string]$win.name; size = [long]$win.size } } else { $latest['windows'] = $null }
     }
     return @{ repo = $name; description = [string]$Repo.description; url = $repoUrl; avatar = $avatar; latest = $latest }
@@ -734,7 +745,11 @@ function Get-DevStoreStarredAutoInstall {
             if (@($Known | Where-Object { $_ -ieq $name }).Count) { continue }
             if (@($configured | Where-Object { $_ -ieq $name }).Count) { continue }
             $latest = $r['latest']
-            if ($latest -is [hashtable] -and $latest['windows']) { $install += $name }
+            if ($latest -is [hashtable] -and $latest['windows']) {
+                # Several files need a click: automatic installs stay as simple as they always were.
+                if ($latest.ContainsKey('windowsFiles') -and @($latest['windowsFiles']).Count -ne 1) { continue }
+                $install += $name
+            }
         }
     }
     return @{ install = $install; known = $now }

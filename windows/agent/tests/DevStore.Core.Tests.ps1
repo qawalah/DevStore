@@ -761,3 +761,46 @@ Describe 'Window app or command-line tool' {
         $a | Should -Match '\$env:Path'
     }
 }
+
+Describe 'Starred entries: the chosen file set' {
+    BeforeAll {
+        function New-EntryRepo { [pscustomobject]@{ full_name = 'boykopovar/AnyPS5'; description = ''; html_url = 'https://github.com/boykopovar/AnyPS5'; owner = $null } }
+        function New-EntryRelease($Tag, $Names) {
+            [pscustomobject]@{ tag_name = $Tag; name = ''; draft = $false; prerelease = $false; published_at = ''; body = ''
+                html_url = "https://github.com/boykopovar/AnyPS5/releases/tag/$Tag"
+                assets = @($Names | ForEach-Object { [pscustomobject]@{ name = $_; size = 2048; browser_download_url = "https://github.com/boykopovar/AnyPS5/releases/download/$Tag/$_" } }) }
+        }
+        $script:AnyNames = 'relinker-v0.1.5.exe', 'relinker-v0.1.5', 'prx-windows-v0.1.5.zip', 'prx-windows-unpatched-v0.1.5.zip',
+            'prx-linux-v0.1.5.zip', 'prx-headers-v0.1.5.zip', 'web-v0.1.5.zip'
+    }
+    It 'lists every file it would install' {
+        $e = ConvertTo-DevStoreStarredEntry -Repo (New-EntryRepo) -Releases @((New-EntryRelease 'v0.1.5' $script:AnyNames))
+        @($e.latest.windowsFiles | ForEach-Object { $_.name } | Sort-Object) | Should -Be @('prx-windows-v0.1.5.zip', 'relinker-v0.1.5.exe')
+        $e.latest.windowsFiles[0].size | Should -Be 2048
+        $e.latest.windowsOverride | Should -BeFalse
+        $e.latest.windowsError | Should -BeNullOrEmpty
+        $e.latest.windows.name | Should -BeIn @('prx-windows-v0.1.5.zip', 'relinker-v0.1.5.exe')
+    }
+    It 'follows the user''s choice and says so' {
+        $ov = @{ patterns = @('relinker-*.exe'); main = '' }
+        $e = ConvertTo-DevStoreStarredEntry -Repo (New-EntryRepo) -Releases @((New-EntryRelease 'v0.1.5' $script:AnyNames)) -Override $ov
+        @($e.latest.windowsFiles | ForEach-Object { $_.name }) | Should -Be @('relinker-v0.1.5.exe')
+        $e.latest.windowsOverride | Should -BeTrue
+        $e.latest.windows.name | Should -Be 'relinker-v0.1.5.exe'
+    }
+    It 'explains an over-sized set instead of offering an install' {
+        $names = 1..5 | ForEach-Object { "part$_-windows.zip" }
+        $e = ConvertTo-DevStoreStarredEntry -Repo (New-EntryRepo) -Releases @((New-EntryRelease 'v1' $names))
+        $e.latest.windows | Should -BeNullOrEmpty
+        @($e.latest.windowsFiles).Count | Should -Be 0
+        $e.latest.windowsError | Should -Match 'more Windows files'
+    }
+    It 'installs newly starred repos by themselves only when the set is a single file' {
+        $repos = @(
+            @{ repo = 'a/one'; latest = @{ windows = @{ name = 'one-win.zip' }; windowsFiles = @(@{ name = 'one-win.zip' }) } },
+            @{ repo = 'b/two'; latest = @{ windows = @{ name = 'x.exe' }; windowsFiles = @(@{ name = 'x.exe' }, @{ name = 'y-windows.zip' }) } },
+            @{ repo = 'c/old'; latest = @{ windows = @{ name = 'c-win.zip' } } })
+        $r = Get-DevStoreStarredAutoInstall -Repos $repos -Known @('z/z') -Config @{ apps = @(); starredAutoInstall = $true }
+        @($r.install | Sort-Object) | Should -Be @('a/one', 'c/old')
+    }
+}
