@@ -502,15 +502,46 @@ function Update-DevStoreApp {
     }
 }
 
+function Save-DevStoreVerifiedAsset {
+    # Downloads one release file and checks its sha256 (GitHub's own digest, else a
+    # <file>.sha256 in the release, else it is installed as downloaded and the log says so).
+    # Deletes the file and throws when the hash is wrong.
+    param([string]$Repo, $Release, $Asset, [string]$Token, [string]$Root, [string]$OutFile)
+    Save-DevStoreAsset -Repo $Repo -AssetId $Asset.id -Token $Token -OutFile $OutFile
+    $shaText = Get-DevStoreAssetSha256 $Asset
+    if (-not $shaText) {
+        $shaAsset = @($Release.assets | Where-Object { $_ -and $_.name -ieq "$($Asset.name).sha256" }) | Select-Object -First 1
+        if ($shaAsset) {
+            $shaFile = "$OutFile.sha256"
+            Save-DevStoreAsset -Repo $Repo -AssetId $shaAsset.id -Token $Token -OutFile $shaFile
+            $shaText = Get-Content -LiteralPath $shaFile -Raw
+            Remove-Item -LiteralPath $shaFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($null -ne $shaText) {
+        if (-not (Test-DevStoreHash -File $OutFile -ShaText $shaText)) {
+            Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+            throw "Downloaded $($Asset.name) failed its sha256 hash check; will retry next run."
+        }
+    }
+    else {
+        Write-DevStoreLog -Root $Root -App $Repo -Message "$($Asset.name) has no published checksum; installed as downloaded"
+    }
+}
+
 function Update-DevStoreStarredApp {
     # Installs or updates an app from a starred repo (someone else's, not built by
-    # DevStore). Takes the newest stable release's Windows .zip or portable .exe,
-    # checks its sha256 when one is published, unpacks it into apps\starred-...,
-    # and adds a Start menu shortcut. Always a window app; never a service, never
-    # run by the updater itself. Same -Mode and -Apply as Update-DevStoreApp, and
-    # likewise never throws.
+    # DevStore). Takes the newest stable release's Windows files (a .zip or portable
+    # .exe, or several that belong together, e.g. a tool and its libraries), checks
+    # each one's sha256 when one is published, unpacks them side by side into
+    # apps\starred-..., and adds a Start menu shortcut: the program itself for a window
+    # app, a terminal in its folder for a command-line tool. Never a service, never run
+    # by the updater itself. Same -Mode and -Apply as Update-DevStoreApp, and likewise
+    # never throws. -Override is the user's own choice of files (see Select-DevStoreStarredAssets).
+    # An app installed before file sets existed (no installedFiles) stays on one file per
+    # update until an override is set.
     param([string]$Repo, $AppState, [string]$Root, [string]$Token, $Releases = $null,
-        [string]$Mode = 'auto', [switch]$Apply)
+        [string]$Mode = 'auto', [switch]$Apply, $Override = $null)
     $s = Copy-DevStoreAppState $AppState
     $s['lastChecked'] = Get-DevStoreTimestamp
     $s['source'] = 'starred'
@@ -522,25 +553,37 @@ function Update-DevStoreStarredApp {
             if (-not $s['installed']) { $s['status'] = 'error'; $s['lastError'] = 'This repo has no release to install yet.' }
             return $s
         }
-        $asset = Select-DevStoreStarredAsset -Assets $release.assets
         $tag = [string]$release.tag_name
-        if (-not $asset) {
+        $legacy = ($s['installed'] -and -not $s.ContainsKey('installedFiles') -and $null -eq $Override)
+        if ($legacy) {
+            $single = Select-DevStoreStarredAsset -Assets $release.assets
+            $set = @{ assets = @(); error = $null }
+            if ($single) { $set['assets'] = @($single) }
+        }
+        else { $set = Select-DevStoreStarredAssets -Assets $release.assets -Tag $tag -Override $Override }
+        $chosen = @($set['assets'])
+        if (-not $chosen.Count) {
+            $why = [string]$set['error']
+            if (-not $why) { $why = "Release $tag has no Windows download DevStore can install (a .zip or a portable .exe). Installers are download-in-browser only." }
             if ($s['installed']) {
                 # Keep the installed version; say why it isn't updating.
                 $s['latest'] = $tag
-                if ($s['installed'] -ne $tag) {
+                if ($s['installed'] -ne $tag -or $set['error']) {
                     $s['status'] = 'error'
-                    $s['lastError'] = "Release $tag has no Windows download DevStore can install (a .zip or a portable .exe). Installers are download-in-browser only."
+                    $s['lastError'] = $why
                 }
                 return $s
             }
-            throw "Release $tag has no Windows download DevStore can install (a .zip or a portable .exe). Installers are download-in-browser only."
+            throw $why
         }
+        $names = @($chosen | ForEach-Object { [string]$_.name })
+        $key = { param($list) ((@($list) | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object) -join '|') }
+        $sameFiles = $legacy -or ((& $key $names) -eq (& $key $s['installedFiles']))
         $s['latest'] = $tag
         $appDir = Join-DevStorePath $Root 'apps' $name
         $action = 'update'
         if (-not $s['installed']) { $action = 'install' }
-        elseif ($s['installed'] -eq $tag) { $action = 'none' }
+        elseif ($s['installed'] -eq $tag -and $sameFiles) { $action = 'none' }
 
         if ($action -eq 'none') {
             $s['status'] = 'ok'; $s['lastError'] = $null
@@ -560,52 +603,45 @@ function Update-DevStoreStarredApp {
             return $s
         }
 
-        # Download, check and unpack once per release (.verified marks a complete copy).
+        # Download, check and unpack once per release and file choice (.verified marks a complete copy).
         $versionsDir = Join-DevStorePath $appDir 'versions'
         $folder = ConvertTo-DevStoreVersionFolder $tag
+        if ($null -ne $Override) { $folder = Get-DevStoreStarredFolderName -Tag $tag -Names $names }
         $target = Join-DevStorePath $versionsDir $folder
         $verified = Join-DevStorePath $target '.verified'
         if (-not (Test-Path -LiteralPath $verified)) {
             Write-DevStoreProgress -Root $Root -Text "Downloading $Repo $tag"
             $dl = Join-DevStorePath $Root 'downloads'
             if (-not (Test-Path -LiteralPath $dl)) { New-Item -ItemType Directory -Path $dl -Force | Out-Null }
-            $file = Join-DevStorePath $dl "$name-$folder-$([System.IO.Path]::GetFileName([string]$asset.name))"
-            Save-DevStoreAsset -Repo $Repo -AssetId $asset.id -Token $Token -OutFile $file
-            # GitHub's own checksum when it has one, else a <file>.sha256 next to it in the release.
-            $expected = Get-DevStoreAssetSha256 $asset
-            $shaText = $null
-            if ($expected) { $shaText = $expected }
-            else {
-                $shaAsset = @($release.assets | Where-Object { $_ -and $_.name -ieq "$($asset.name).sha256" }) | Select-Object -First 1
-                if ($shaAsset) {
-                    $shaFile = "$file.sha256"
-                    Save-DevStoreAsset -Repo $Repo -AssetId $shaAsset.id -Token $Token -OutFile $shaFile
-                    $shaText = Get-Content -LiteralPath $shaFile -Raw
-                    Remove-Item -LiteralPath $shaFile -Force -ErrorAction SilentlyContinue
-                }
-            }
-            if ($null -ne $shaText) {
-                if (-not (Test-DevStoreHash -File $file -ShaText $shaText)) {
-                    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
-                    throw "Downloaded $($asset.name) failed its sha256 hash check; will retry next run."
-                }
-            }
-            else {
-                Write-DevStoreLog -Root $Root -App $Repo -Message "$($asset.name) has no published checksum; installed as downloaded"
-            }
             if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
             New-Item -ItemType Directory -Path $target -Force | Out-Null
-            if ($file -match '\.zip$') { Expand-Archive -LiteralPath $file -DestinationPath $target -Force }
-            else { Copy-Item -LiteralPath $file -Destination (Join-DevStorePath $target ([System.IO.Path]::GetFileName([string]$asset.name))) }
-            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+            foreach ($asset in $chosen) {
+                $leaf = [System.IO.Path]::GetFileName([string]$asset.name)
+                $file = Join-DevStorePath $dl "$name-$folder-$leaf"
+                Save-DevStoreVerifiedAsset -Repo $Repo -Release $release -Asset $asset -Token $Token -Root $Root -OutFile $file
+                if ($file -match '\.zip$') { Expand-Archive -LiteralPath $file -DestinationPath $target -Force }
+                else {
+                    $saveAs = $leaf
+                    if (-not $legacy) { $saveAs = ConvertTo-DevStoreStandaloneExeName -Name $leaf -Tag $tag }
+                    Copy-Item -LiteralPath $file -Destination (Join-DevStorePath $target $saveAs)
+                }
+                Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+            }
             Set-Content -LiteralPath $verified -Value $tag
         }
         $base = (Get-Item -LiteralPath $target).FullName.TrimEnd('\', '/')
         $prefix = $base.Length + 1
         $files = @(Get-ChildItem -LiteralPath $base -Recurse -File -Filter '*.exe' | ForEach-Object {
                 @{ path = $_.FullName.Substring($prefix); size = [long]$_.Length } })
-        $exe = Select-DevStoreStarredExe -Files $files -Repo $Repo
-        if (-not $exe) { throw "No program to open found in $($asset.name) (it may only contain an installer)." }
+        $exe = $null
+        if ($Override -and $Override['main']) {
+            $wanted = [string]$Override['main']
+            $hit = @($files | Where-Object { ([string]$_['path'] -replace '/', '\').Split('\')[-1] -ieq $wanted }) | Select-Object -First 1
+            if (-not $hit) { throw "Your chosen main program $wanted is not in $tag." }
+            $exe = ([string]$hit['path']) -replace '/', '\'
+        }
+        else { $exe = Select-DevStoreStarredExe -Files $files -Repo $Repo }
+        if (-not $exe) { throw "No program to open found in $($names -join ', ') (it may only contain an installer)." }
 
         if ($waitForUser -and $Mode -eq 'download') {
             if ($s['status'] -ne 'ready') { Write-DevStoreLog -Root $Root -App $Repo -Message "$tag downloaded, ready to install" }
@@ -621,21 +657,35 @@ function Update-DevStoreStarredApp {
 
         Write-DevStoreProgress -Root $Root -Text "Installing $Repo $tag"
         $displayName = ($Repo -split '/')[-1]
+        $type = 'gui'
+        if (-not $legacy) { $type = Get-DevStorePeSubsystemOfFile -Path (Join-DevStorePath $target $exe) }
         $current = Join-DevStorePath $appDir 'current'
         $old = $s['installed']
         $oldFolder = $s['installedFolder']
+        $oldType = [string]$s['type']
         Set-DevStoreJunction -Link $current -Target $target
-        New-DevStoreShortcut -DisplayName $displayName -Target (Join-DevStorePath $current $exe)
+        if ($type -eq 'cli') {
+            $sys = $env:SystemRoot
+            if (-not $sys) { $sys = 'C:\Windows' }
+            New-DevStoreShortcut -DisplayName "$displayName (command line)" -Target (Join-DevStorePath $sys 'System32' 'WindowsPowerShell' 'v1.0' 'powershell.exe') `
+                -Arguments (Get-DevStoreCliShortcutArguments -Dir $current) -WorkingDirectory $current
+            if ($oldType -and $oldType -ne 'cli') { Remove-DevStoreShortcut -DisplayName $displayName }
+        }
+        else {
+            New-DevStoreShortcut -DisplayName $displayName -Target (Join-DevStorePath $current $exe)
+            if ($oldType -eq 'cli') { Remove-DevStoreShortcut -DisplayName "$displayName (command line)" }
+        }
         if ($action -eq 'install') { Write-DevStoreLog -Root $Root -App $Repo -Message "installed $tag" }
         else { Write-DevStoreLog -Root $Root -App $Repo -Message "updated $old -> $tag" }
 
         $s['name'] = $name
-        $s['type'] = 'gui'
+        $s['type'] = $type
         $s['exe'] = $exe
         $s['displayName'] = $displayName
         $s['previous'] = $old
         $s['installed'] = $tag
         $s['installedFolder'] = $folder
+        if (-not $legacy) { $s['installedFiles'] = $names }
         $s['restartPending'] = $false
         $s['status'] = 'ok'
         $s['lastError'] = $null

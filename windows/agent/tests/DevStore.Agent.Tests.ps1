@@ -1078,3 +1078,184 @@ Describe 'Remove-DevStoreAppCore: command-line tools' {
         $state['apps'].ContainsKey('a/tool') | Should -BeFalse
     }
 }
+
+Describe 'Update-DevStoreStarredApp: sets of files' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Fixtures = Join-Path $script:Root 'fixtures'
+        New-Item -ItemType Directory -Path $script:Fixtures -Force | Out-Null
+        $script:Junctions = @{}
+        $script:ShortcutCalls = @()
+        $script:Removed = @()
+        $script:Subsystem = 'gui'
+        Mock -ModuleName DevStore.Agent Save-DevStoreAsset {
+            param($Repo, $AssetId, $Token, $OutFile)
+            Copy-Item (Join-Path $script:Fixtures $AssetId) $OutFile
+        }
+        Mock -ModuleName DevStore.Agent Set-DevStoreJunction { param($Link, $Target) $script:Junctions[$Link] = $Target }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $false }
+        Mock -ModuleName DevStore.Agent New-DevStoreShortcut {
+            param($DisplayName, $Target, $Arguments, $WorkingDirectory)
+            $script:ShortcutCalls += , @{ DisplayName = $DisplayName; Target = $Target; Arguments = $Arguments; WorkingDirectory = $WorkingDirectory }
+        }
+        Mock -ModuleName DevStore.Agent Remove-DevStoreShortcut { param($DisplayName) $script:Removed += $DisplayName }
+        Mock -ModuleName DevStore.Agent Get-DevStorePeSubsystemOfFile { $script:Subsystem }
+    }
+    BeforeAll {
+        # One release file in the fixtures folder: an exe, or a zip made from @{ 'libs/a.dll' = 'x' }.
+        function New-SetAsset {
+            param([string]$Name, [hashtable]$Files = @{ 'f.txt' = 'x' }, [switch]$WrongDigest, [switch]$Decoy)
+            $id = "$Name-" + [guid]::NewGuid().ToString('N')
+            if ($Decoy) { return [pscustomobject]@{ id = $id; name = $Name; size = 5 } }
+            $file = Join-Path $script:Fixtures $id
+            if ($Name -match '\.zip$') {
+                $src = Join-Path $TestDrive ('src-' + [guid]::NewGuid().ToString('N'))
+                foreach ($k in $Files.Keys) {
+                    $path = Join-Path $src $k
+                    New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+                    Set-Content -Path $path -Value $Files[$k]
+                }
+                Compress-Archive -Path (Join-Path $src '*') -DestinationPath "$file.zip" -Force
+                Move-Item "$file.zip" $file
+            }
+            else { Set-Content -Path $file -Value "exe $Name" }
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+            if ($WrongDigest) { $hash = '0' * 64 }
+            [pscustomobject]@{ id = $id; name = $Name; size = 5; digest = "sha256:$hash" }
+        }
+        function New-SetRelease([string]$Tag, $Assets, [string]$At = '2026-11-01T00:00:00Z') {
+            [pscustomobject]@{ tag_name = $Tag; draft = $false; prerelease = $false; published_at = $At; assets = @($Assets) }
+        }
+        function New-AnyPS5([string]$Tag, [switch]$BadZip) {
+            New-SetRelease $Tag @(
+                (New-SetAsset "relinker-$Tag.exe"),
+                (New-SetAsset "relinker-$Tag" -Decoy),
+                (New-SetAsset "prx-windows-$Tag.zip" @{ 'libs/a.dll' = 'dll' } -WrongDigest:$BadZip),
+                (New-SetAsset "prx-windows-unpatched-$Tag.zip" -Decoy),
+                (New-SetAsset "prx-linux-$Tag.zip" -Decoy),
+                (New-SetAsset "prx-headers-$Tag.zip" -Decoy),
+                (New-SetAsset "web-$Tag.zip" -Decoy))
+        }
+        function Get-Dir { P $script:Root 'apps' 'starred-boykopovar--anyps5' }
+    }
+
+    It 'installs the exe and the libs zip of AnyPS5 as a set, as a command-line tool' {
+        $script:Subsystem = 'cli'
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.5'))
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be 'v0.1.5'
+        $s.type | Should -Be 'cli'
+        $s.exe | Should -Be 'relinker.exe'
+        @($s.installedFiles | Sort-Object) | Should -Be @('prx-windows-v0.1.5.zip', 'relinker-v0.1.5.exe')
+        Test-Path (P (Get-Dir) 'versions' 'v0.1.5' 'relinker.exe') | Should -BeTrue
+        Test-Path (P (Get-Dir) 'versions' 'v0.1.5' 'libs' 'a.dll') | Should -BeTrue
+        $script:ShortcutCalls.Count | Should -Be 1
+        $script:ShortcutCalls[0].DisplayName | Should -Be 'AnyPS5 (command line)'
+        $script:ShortcutCalls[0].Arguments | Should -Match '^-NoExit '
+        $script:ShortcutCalls[0].WorkingDirectory | Should -Be (P (Get-Dir) 'current')
+    }
+
+    It 'a set whose program is a window app gets the normal shortcut' {
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.5'))
+        $s.type | Should -Be 'gui'
+        $script:ShortcutCalls[0].DisplayName | Should -Be 'AnyPS5'
+        $script:ShortcutCalls[0].Target | Should -Be (P (Get-Dir) 'current' 'relinker.exe')
+    }
+
+    It 'finds the same files again in the next release and keeps the previous one' {
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.5'))
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.6'))
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be 'v0.1.6'
+        $s.previous | Should -Be 'v0.1.5'
+        @($s.installedFiles | Sort-Object) | Should -Be @('prx-windows-v0.1.6.zip', 'relinker-v0.1.6.exe')
+        Test-Path (P (Get-Dir) 'versions' 'v0.1.6' 'relinker.exe') | Should -BeTrue
+        Test-Path (P (Get-Dir) 'versions' 'v0.1.6' 'libs' 'a.dll') | Should -BeTrue
+    }
+
+    It 'keeps the old version when one file of the new set fails its checksum' {
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.5'))
+        $junction = $script:Junctions[(P (Get-Dir) 'current')]
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.6' -BadZip))
+        $s.status | Should -Be 'error'
+        $s.lastError | Should -Match 'sha256'
+        $s.installed | Should -Be 'v0.1.5'
+        $script:ShortcutCalls.Count | Should -Be 1
+        $script:Junctions[(P (Get-Dir) 'current')] | Should -Be $junction
+    }
+
+    It 'installs nothing when the set is over the limit: an error on a first install, the old version kept on an update' {
+        $many = New-SetRelease 'v2' @(1..5 | ForEach-Object { New-SetAsset "part$_-windows.zip" })
+        $first = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @($many)
+        $first.status | Should -Be 'error'
+        $first.lastError | Should -Match 'more Windows files'
+        $first.installed | Should -BeNullOrEmpty
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @((New-AnyPS5 'v0.1.5'))
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @($many)
+        $s.status | Should -Be 'error'
+        $s.installed | Should -Be 'v0.1.5'
+    }
+
+    It 'legacy: an app installed before this version keeps one file per update' {
+        $legacy = @{ installed = 'v1'; installedFolder = 'v1'; name = 'starred-boykopovar--anyps5'; type = 'gui'; source = 'starred'; exe = 'Tool.exe'; status = 'ok' }
+        $rel = New-SetRelease 'v2' @(
+            (New-SetAsset 'tool-v2-windows-x64.zip' @{ 'Tool.exe' = 'a' }),
+            (New-SetAsset 'helper-v2-windows-x64.zip' @{ 'Helper.exe' = 'b' }))
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $legacy -Root $Root -Token 't' -Releases @($rel)
+        $s.status | Should -Be 'ok'
+        $s.installed | Should -Be 'v2'
+        $s.type | Should -Be 'gui'
+        $s.ContainsKey('installedFiles') | Should -BeFalse
+        $s.installedFolder | Should -Be 'v2'
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 1 -Exactly
+    }
+
+    It 'choosing files moves a legacy app to the new rules' {
+        $legacy = @{ installed = 'v1'; installedFolder = 'v1'; name = 'starred-boykopovar--anyps5'; type = 'gui'; source = 'starred'; exe = 'Tool.exe'; status = 'ok' }
+        $rel = New-SetRelease 'v2' @(
+            (New-SetAsset 'tool-v2-windows-x64.zip' @{ 'Tool.exe' = 'a' }),
+            (New-SetAsset 'helper-v2-windows-x64.zip' @{ 'Helper.exe' = 'b' }))
+        $ov = @{ patterns = @('tool-*-windows-x64.zip', 'helper-*-windows-x64.zip'); main = '' }
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $legacy -Root $Root -Token 't' -Releases @($rel) -Override $ov
+        $s.status | Should -Be 'ok'
+        @($s.installedFiles).Count | Should -Be 2
+        $s.installedFolder | Should -Match '^v2-[0-9a-f]{4}$'
+    }
+
+    It 'a changed choice rebuilds the same release in its own folder, and waits while the app is open' {
+        $rel = New-AnyPS5 'v0.1.5'
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $ov = @{ patterns = @('relinker-*.exe'); main = '' }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        $p = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Override $ov -Apply
+        $p.status | Should -Be 'pending'
+        $p.installedFolder | Should -Be 'v0.1.5'
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $false }
+        $n = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Override $ov -Apply
+        $n.status | Should -Be 'ok'
+        $n.installed | Should -Be 'v0.1.5'
+        $n.previous | Should -Be 'v0.1.5'
+        @($n.installedFiles) | Should -Be @('relinker-v0.1.5.exe')
+        $n.installedFolder | Should -Match '^v0\.1\.5-[0-9a-f]{4}$'
+        $script:Junctions[(P (Get-Dir) 'current')] | Should -Be (P (Get-Dir) 'versions' $n.installedFolder)
+    }
+
+    It 'does nothing and downloads nothing when the release and the files are unchanged' {
+        $rel = New-AnyPS5 'v0.1.5'
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @($rel)
+        $s.status | Should -Be 'ok'
+        Should -Invoke -ModuleName DevStore.Agent Save-DevStoreAsset -Times 2 -Exactly
+    }
+
+    It 'opens the program, not a helper, and lets the override name the main program' {
+        $rel = New-SetRelease 'v1' @((New-SetAsset 'tool-v1-windows-x64.zip' @{ 'tool.exe' = 'a'; 'other.exe' = 'b' }))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $s.exe | Should -Be 'tool.exe'
+        $ov = @{ patterns = @('tool-*-windows-x64.zip'); main = 'other.exe' }
+        $s2 = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel) -Override $ov
+        $s2.exe | Should -Be 'other.exe'
+        $bad = @{ patterns = @('tool-*-windows-x64.zip'); main = 'missing.exe' }
+        (Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel) -Override $bad).status | Should -Be 'error'
+    }
+}

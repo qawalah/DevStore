@@ -503,7 +503,7 @@ function Select-DevStoreStarredAsset {
 }
 
 # ---- a set of files per release (an exe plus its libraries, say)
-$script:VersionTokenPattern = 'v?\d+(?:\.\d+)+'
+$script:VersionTokenPattern = '(?<![A-Za-z0-9])(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)'
 $script:AssetSystemWords = 'windows|win32|win64|win|x64|x86_64|x86-64|amd64|portable|unpatched|patched'
 $script:AssetSkipWords = 'headers|include|sdk|docs|web|wasm|browser|checksums|sha256|sha256sums|sig|signature'
 $script:AssetVariantWords = 'unpatched|legacy|lite|noavx|old|compat'
@@ -648,6 +648,16 @@ function Get-DevStoreCliShortcutArguments {
     param([string]$Dir)
     $q = $Dir.Replace("'", "''")
     return "-NoExit -NoProfile -ExecutionPolicy Bypass -Command `"`$env:Path = '$q;' + `$env:Path; Set-Location -LiteralPath '$q'`""
+}
+
+function Get-DevStoreStarredFolderName {
+    # The version folder of a release built from a user-chosen set of files: '<tag>-<4 hex of the chosen names>'.
+    param([string]$Tag, [string[]]$Names)
+    $joined = (@($Names | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hex = ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined)) | ForEach-Object { $_.ToString('x2') }) -join '' }
+    finally { $sha.Dispose() }
+    return (ConvertTo-DevStoreVersionFolder $Tag) + '-' + $hex.Substring(0, 4)
 }
 
 function Select-DevStoreStarredExe {
@@ -883,6 +893,6 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Get-DevStoreAndroidRelease, Select-DevStorePlatformShots,
     Select-DevStoreStarredRelease, Get-DevStoreStarredAssetScore, Select-DevStoreStarredAsset, Select-DevStoreStarredExe,
     Get-DevStoreAssetBaseName, ConvertTo-DevStoreStandaloneExeName, Select-DevStoreStarredAssets,
-    Get-DevStorePeSubsystem, Get-DevStorePeSubsystemOfFile, Get-DevStoreCliShortcutArguments,
+    Get-DevStoreStarredFolderName, Get-DevStorePeSubsystem, Get-DevStorePeSubsystemOfFile, Get-DevStoreCliShortcutArguments,
     ConvertTo-DevStoreAssetPattern, Test-DevStoreAssetPattern, Set-DevStoreStarredFiles, Get-DevStoreStarredFiles,
     ConvertTo-DevStoreStarredAppName, ConvertTo-DevStoreVersionFolder, Get-DevStoreAssetSha256, Get-DevStoreStarredAutoInstall

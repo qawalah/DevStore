@@ -662,6 +662,11 @@ Describe 'Starred overrides' {
         Test-DevStoreAssetPattern -Pattern 'tool.exe' -Name 'tool.exe' | Should -BeTrue
         Test-DevStoreAssetPattern -Pattern 'tool.exe' -Name 'toolxexe' | Should -BeFalse
     }
+    It 'treats a dotless tag like v2 as a version too' {
+        ConvertTo-DevStoreAssetPattern -Name 'tool-v2-windows-x64.zip' -Tag 'v2' | Should -Be 'tool-*-windows-x64.zip'
+        Test-DevStoreAssetPattern -Pattern 'tool-*-windows-x64.zip' -Name 'tool-v10-windows-x64.zip' | Should -BeTrue
+        Test-DevStoreAssetPattern -Pattern 'tool-*-x64.zip' -Name 'tool-win64-x64.zip' | Should -BeFalse
+    }
     It 'turns a chosen name into a pattern' {
         ConvertTo-DevStoreAssetPattern -Name 'relinker-v0.1.5.exe' -Tag 'v0.1.5' | Should -Be 'relinker-*.exe'
         ConvertTo-DevStoreAssetPattern -Name 'tool.exe' -Tag 'v0.1.5' | Should -Be 'tool.exe'

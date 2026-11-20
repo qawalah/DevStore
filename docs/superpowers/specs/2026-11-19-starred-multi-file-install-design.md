@@ -140,9 +140,10 @@ kept, as with a release without a Windows file today.
   **Choose files...** on them. New installs use the new rules.
 - **Changing the override applies at once, whatever the update setting**, as
   the user asked for it. It rebuilds the **current** release as a new version
-  folder named `<tag>-<4-char hash of the chosen names>` (new installs use this
-  name from the start; legacy apps keep the plain tag), switched like an
-  update, with the old set as "previous". If the app is running it waits for
+  folder named `<tag>-<4-char hash of the chosen names>` (used only when an
+  override is in use; everything else keeps the plain tag folder, so existing
+  installs look exactly as before), switched like an update, with the old set
+  as "previous". If the app is running it waits for
   the app to close ("pending"), as updates do.
 - **Automatic install of repos you star from now on** installs only when the
   chosen set is a single file, as today. A set of several files needs a click
