@@ -260,7 +260,7 @@ function renderSettings(v) {
     <section><h2>Starred apps</h2>
       <label class="check"><input type="checkbox" id="starred-auto"${st.starredAutoInstall ? " checked" : ""}>
         <span>Install apps I star from now on automatically</span></label>
-      <p class="muted">When you star a repo on GitHub whose latest release has a Windows download, DevStore installs it within the hour, with updates set as above. Repos you starred before turning this on are left alone; install those from <button class="link" data-nav="starred">Starred</button>. ${TRUST_NOTE}</p></section>
+      <p class="muted">When you star a repo on GitHub whose latest release has a single Windows download, DevStore installs it within the hour, with updates set as above. A release that needs several files waits for your click on Install. Repos you starred before turning this on are left alone; install those from <button class="link" data-nav="starred">Starred</button>. ${TRUST_NOTE}</p></section>
     <section><h2>Where things are</h2><div class="facts">
       ${folder("programs", "Programs", (loc.programs || "") + "\\<app name>")}
       ${folder("data", "App data", (loc.data || "") + "\\<app name>  (kept when an app is removed)")}

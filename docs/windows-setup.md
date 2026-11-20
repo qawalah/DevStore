@@ -106,15 +106,37 @@ download DevStore can install, its page shows **Install on this PC**:
    `C:\DevStore\apps\starred-<owner>--<repo>\`, adds it to the Start menu and
    lists it under **Installed**. **Remove** takes it off the PC again.
 
-What DevStore can install: a `.zip` with Windows in its name (for example
-`tool-1.2-windows-x64.zip`) or a portable `.exe`. It skips installers
-(`setup.exe`, `.msi`), other systems (Linux, macOS, ARM) and source code.
-It checks the file's SHA-256 when GitHub or the release publishes one. For
-anything else, **Download in browser** still opens the file's GitHub link.
+What DevStore can install: for each release it picks the Windows files the
+app needs and installs them **together** in one folder. That is usually a
+`.zip` with Windows in its name (for example `tool-1.2-windows-x64.zip`) or a
+portable `.exe`, and sometimes both, such as a command-line tool plus the
+library folder it needs. It skips installers (`setup.exe`, `.msi`), other
+systems (Linux, macOS, ARM), headers, web builds, source code and duplicate
+variants (for example an `-unpatched` copy), and installs at most 4 files
+(600 MB). The app's page lists the files it will install. It checks each
+file's SHA-256 when GitHub or the release publishes one. For anything else,
+**Download in browser** still opens the file's GitHub link.
+
+**Window apps and command-line tools.** DevStore reads the program to see
+which kind it is. A window app gets a normal Start menu shortcut. A
+command-line tool gets a shortcut named **`<name> (command line)`** that
+opens a PowerShell window in its folder, so you can type its name and
+arguments straight away. Nothing is added to your PC's `PATH`. In DevStore the
+app shows as **Command-line tool**, and **Open terminal** starts that window.
+
+**Choose files…** If DevStore picks the wrong files, or the release has more
+than it can decide between, open the app's page in **Starred** and click
+**Choose files…**. Tick the files you want (up to 4) and, if there are
+several programs, which one is the main one. Click **Use these files**. DevStore
+installs that choice at once, and uses it for every new release too (it
+recognises the files by name, with the version number swapped out). **Back to
+automatic** removes your choice. Apps you installed from Starred before this
+existed keep installing one file per update until you choose files for them.
 
 **Install apps you star automatically.** Turn on **Settings → Starred apps**
 and any repo you star *from then on* is installed within the hour (if its
-release has a Windows download), with updates set to your default. Repos
+release has a single Windows file; a release that needs several files waits for your click on
+**Install**), with updates set to your default. Repos
 you starred before turning it on are left alone.
 
 Starred apps come from their owners' releases: DevStore doesn't build or
