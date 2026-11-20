@@ -195,13 +195,14 @@ function Test-DevStoreOldProcessRunning {
 }
 
 function New-DevStoreShortcut {
-    param([string]$DisplayName, [string]$Target)
+    param([string]$DisplayName, [string]$Target, [string]$Arguments = '', [string]$WorkingDirectory = '')
     $dir = Join-DevStorePath $env:ProgramData 'Microsoft' 'Windows' 'Start Menu' 'Programs' 'DevStore'
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut((Join-DevStorePath $dir "$DisplayName.lnk"))
     $lnk.TargetPath = $Target
-    $lnk.WorkingDirectory = Split-Path -Parent $Target
+    if ($Arguments) { $lnk.Arguments = $Arguments }
+    if ($WorkingDirectory) { $lnk.WorkingDirectory = $WorkingDirectory } else { $lnk.WorkingDirectory = Split-Path -Parent $Target }
     $lnk.Save()
 }
 
@@ -746,6 +747,7 @@ function Remove-DevStoreAppCore {
         $display = $name
         if ($app['displayName']) { $display = $app['displayName'] }
         Remove-DevStoreShortcut -DisplayName $display
+        Remove-DevStoreShortcut -DisplayName "$display (command line)"
         $appDir = Join-DevStorePath $Root 'apps' $name
         $current = Join-DevStorePath $appDir 'current'
         if (Test-Path -LiteralPath $current) { [System.IO.Directory]::Delete($current) }

@@ -1063,3 +1063,18 @@ Describe 'Starred apps in an updater pass' {
         (Read-DevStoreJson -Path (Join-Path $Root 'config.json') -Default @{}).starredAutoInstall | Should -BeTrue
     }
 }
+
+Describe 'Remove-DevStoreAppCore: command-line tools' {
+    It 'removes both the app and the command-line shortcut' {
+        Mock -ModuleName DevStore.Agent Remove-DevStoreShortcut {}
+        Mock -ModuleName DevStore.Agent Uninstall-DevStoreService {}
+        Mock -ModuleName DevStore.Agent Write-DevStoreLog {}
+        $root = Join-Path $TestDrive 'rm-root'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $state = @{ apps = @{ 'a/tool' = @{ name = 'starred-a--tool'; displayName = 'tool'; type = 'cli' } } }
+        Remove-DevStoreAppCore -Root $root -Repo 'a/tool' -State $state
+        Should -Invoke -ModuleName DevStore.Agent Remove-DevStoreShortcut -Times 1 -ParameterFilter { $DisplayName -eq 'tool' }
+        Should -Invoke -ModuleName DevStore.Agent Remove-DevStoreShortcut -Times 1 -ParameterFilter { $DisplayName -eq 'tool (command line)' }
+        $state['apps'].ContainsKey('a/tool') | Should -BeFalse
+    }
+}

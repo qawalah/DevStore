@@ -614,6 +614,42 @@ function Select-DevStoreStarredAssets {
     return @{ assets = $chosen; error = $null }
 }
 
+function Get-DevStorePeSubsystem {
+    # 'cli' for a console program, 'gui' for everything else, including files that aren't readable programs.
+    param([byte[]]$Bytes)
+    if ($null -eq $Bytes -or $Bytes.Length -lt 0x40) { return 'gui' }
+    if ($Bytes[0] -ne 0x4D -or $Bytes[1] -ne 0x5A) { return 'gui' }
+    $pe = [BitConverter]::ToInt32($Bytes, 0x3C)
+    if ($pe -lt 0 -or ($pe + 24 + 70) -gt $Bytes.Length) { return 'gui' }
+    if ($Bytes[$pe] -ne 0x50 -or $Bytes[$pe + 1] -ne 0x45 -or $Bytes[$pe + 2] -ne 0 -or $Bytes[$pe + 3] -ne 0) { return 'gui' }
+    if ([BitConverter]::ToUInt16($Bytes, $pe + 24 + 68) -eq 3) { return 'cli' }
+    return 'gui'
+}
+
+function Get-DevStorePeSubsystemOfFile {
+    param([string]$Path)
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $buf = New-Object byte[] 4096
+            $n = $fs.Read($buf, 0, $buf.Length)
+            $head = New-Object byte[] $n
+            [Array]::Copy($buf, $head, $n)
+        }
+        finally { $fs.Dispose() }
+        return (Get-DevStorePeSubsystem -Bytes $head)
+    }
+    catch { return 'gui' }
+}
+
+function Get-DevStoreCliShortcutArguments {
+    # powershell.exe arguments for a command-line tool's shortcut: a terminal in the app's folder,
+    # with that folder first on PATH for that window only.
+    param([string]$Dir)
+    $q = $Dir.Replace("'", "''")
+    return "-NoExit -NoProfile -ExecutionPolicy Bypass -Command `"`$env:Path = '$q;' + `$env:Path; Set-Location -LiteralPath '$q'`""
+}
+
 function Select-DevStoreStarredExe {
     # The program to open from an unpacked release: @(@{ path = 'sub\app.exe'; size }) -> 'sub\app.exe'.
     # Skips uninstallers, updaters, crash reporters and helpers; prefers the repo's
@@ -847,5 +883,6 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Get-DevStoreAndroidRelease, Select-DevStorePlatformShots,
     Select-DevStoreStarredRelease, Get-DevStoreStarredAssetScore, Select-DevStoreStarredAsset, Select-DevStoreStarredExe,
     Get-DevStoreAssetBaseName, ConvertTo-DevStoreStandaloneExeName, Select-DevStoreStarredAssets,
+    Get-DevStorePeSubsystem, Get-DevStorePeSubsystemOfFile, Get-DevStoreCliShortcutArguments,
     ConvertTo-DevStoreAssetPattern, Test-DevStoreAssetPattern, Set-DevStoreStarredFiles, Get-DevStoreStarredFiles,
     ConvertTo-DevStoreStarredAppName, ConvertTo-DevStoreVersionFolder, Get-DevStoreAssetSha256, Get-DevStoreStarredAutoInstall

@@ -716,3 +716,43 @@ Describe 'Starred overrides' {
         foreach ($b in $bad) { ConvertFrom-DevStoreRequest $b | Should -BeNullOrEmpty }
     }
 }
+
+Describe 'Window app or command-line tool' {
+    BeforeAll {
+        function New-PeBytes([int]$Subsystem, [int]$Length = 400) {
+            $b = New-Object byte[] $Length
+            $b[0] = 0x4D; $b[1] = 0x5A
+            $b[0x3C] = 0x80
+            if (0x81 -lt $Length) { $b[0x80] = 0x50; $b[0x81] = 0x45 }
+            $off = 0x80 + 24 + 68
+            if ($off + 1 -lt $Length) { $b[$off] = [byte]($Subsystem -band 0xFF); $b[$off + 1] = [byte]($Subsystem -shr 8) }
+            return , $b
+        }
+    }
+    It 'reads the subsystem of a PE header' {
+        Get-DevStorePeSubsystem -Bytes (New-PeBytes 2) | Should -Be 'gui'
+        Get-DevStorePeSubsystem -Bytes (New-PeBytes 3) | Should -Be 'cli'
+    }
+    It 'treats anything it cannot read as a window app' {
+        Get-DevStorePeSubsystem -Bytes ([byte[]]@()) | Should -Be 'gui'
+        Get-DevStorePeSubsystem -Bytes ([byte[]]@(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) | Should -Be 'gui'
+        $truncated = New-PeBytes 3 100
+        Get-DevStorePeSubsystem -Bytes $truncated | Should -Be 'gui'
+        Get-DevStorePeSubsystem -Bytes ([System.Text.Encoding]::ASCII.GetBytes('just some text, not a program at all')) | Should -Be 'gui'
+        $far = New-PeBytes 3; $far[0x3C] = 0xFF; $far[0x3D] = 0xFF
+        Get-DevStorePeSubsystem -Bytes $far | Should -Be 'gui'
+    }
+    It 'reads a file, and calls a missing file a window app' {
+        $f = Join-Path $TestDrive 'console.exe'
+        [System.IO.File]::WriteAllBytes($f, (New-PeBytes 3))
+        Get-DevStorePeSubsystemOfFile -Path $f | Should -Be 'cli'
+        Get-DevStorePeSubsystemOfFile -Path (Join-Path $TestDrive 'missing.exe') | Should -Be 'gui'
+    }
+    It 'builds the terminal shortcut arguments, quoting apostrophes' {
+        $a = Get-DevStoreCliShortcutArguments -Dir "C:\DevStore\apps\o's tool\current"
+        $a | Should -Match '^-NoExit '
+        $a | Should -Match "o''s tool"
+        $a | Should -Match 'Set-Location -LiteralPath'
+        $a | Should -Match '\$env:Path'
+    }
+}
