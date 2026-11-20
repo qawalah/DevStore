@@ -1258,6 +1258,58 @@ Describe 'Update-DevStoreStarredApp: sets of files' {
         $bad = @{ patterns = @('tool-*-windows-x64.zip'); main = 'missing.exe' }
         (Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel) -Override $bad).status | Should -Be 'error'
     }
+    It 'going back to automatic rebuilds the set instead of reusing the old folder' {
+        $legacy = @{ installed = 'v0'; installedFolder = 'v0'; name = 'starred-someone--tool'; type = 'gui'; source = 'starred'; exe = 'Tool.exe'; status = 'ok' }
+        $rel = New-SetRelease 'v1' @((New-SetAsset 'tool-v1-windows-x64.zip' @{ 'Tool.exe' = 'a' }), (New-SetAsset 'helper-v1.exe'))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $legacy -Root $Root -Token 't' -Releases @($rel)
+        $s.installedFolder | Should -Be 'v1'
+        $ov = @{ patterns = @('tool-*-windows-x64.zip'); main = '' }
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Override $ov -Apply
+        @($s.installedFiles) | Should -Be @('tool-v1-windows-x64.zip')
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Apply
+        $s.status | Should -Be 'ok'
+        @($s.installedFiles).Count | Should -Be 2
+        $dir = P $script:Root 'apps' 'starred-someone--tool' 'versions' $s.installedFolder
+        Test-Path (P $dir 'helper.exe') | Should -BeTrue
+        Test-Path (P $dir 'Tool.exe') | Should -BeTrue
+    }
+
+    It 'picks up a file added to the release after it was installed' {
+        $one = New-SetRelease 'v1' @((New-SetAsset 'relinker-v1.exe'))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($one)
+        $two = New-SetRelease 'v1' @((New-SetAsset 'relinker-v1.exe'), (New-SetAsset 'prx-windows-v1.zip' @{ 'libs/a.dll' = 'dll' }))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($two)
+        $s.status | Should -Be 'ok'
+        @($s.installedFiles).Count | Should -Be 2
+        Test-Path (P $script:Root 'apps' 'starred-someone--tool' 'versions' $s.installedFolder 'libs' 'a.dll') | Should -BeTrue
+    }
+
+    It 'a different main program alone is applied' {
+        $rel = New-SetRelease 'v1' @((New-SetAsset 'tool-v1-windows-x64.zip' @{ 'tool.exe' = 'a'; 'other.exe' = 'b' }))
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $null -Root $Root -Token 't' -Releases @($rel)
+        $s.exe | Should -Be 'tool.exe'
+        $ov = @{ patterns = @('tool-*-windows-x64.zip'); main = 'other.exe' }
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Override $ov -Apply
+        $s.exe | Should -Be 'other.exe'
+        $back = @{ patterns = @('tool-*-windows-x64.zip'); main = 'tool.exe' }
+        $s = Update-DevStoreStarredApp -Repo 'someone/tool' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Override $back -Apply
+        $s.exe | Should -Be 'tool.exe'
+        $s.status | Should -Be 'ok'
+    }
+
+    It 'a choice made while the app is open is still applied on the next pass, in just-tell-me mode' {
+        $rel = New-AnyPS5 'v0.1.5'
+        $s = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $null -Root $Root -Token 't' -Releases @($rel) -Mode 'notify'
+        $ov = @{ patterns = @('relinker-*.exe'); main = '' }
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $true }
+        $p = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $s -Root $Root -Token 't' -Releases @($rel) -Mode 'notify' -Override $ov -Apply
+        $p.status | Should -Be 'pending'
+        Mock -ModuleName DevStore.Agent Test-DevStoreGuiRunning { $false }
+        $n = Update-DevStoreStarredApp -Repo 'boykopovar/AnyPS5' -AppState $p -Root $Root -Token 't' -Releases @($rel) -Mode 'notify' -Override $ov
+        $n.status | Should -Be 'ok'
+        @($n.installedFiles) | Should -Be @('relinker-v0.1.5.exe')
+    }
+
 }
 
 Describe 'Starred file choices in the updater' {

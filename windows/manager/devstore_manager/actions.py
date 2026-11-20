@@ -149,8 +149,8 @@ def install_starred(repo: str, mode: str | None = None) -> None:
     start_updater()
 
 
-_FILE_PATTERN_RE = re.compile(r"^[A-Za-z0-9._+*-]{1,120}\.(zip|exe)$")
-_MAIN_PROGRAM_RE = re.compile(r"^[A-Za-z0-9._+-]{1,120}\.exe$")
+_FILE_PATTERN_RE = re.compile(r"^[A-Za-z0-9._+*-]{1,120}\.(zip|exe)$", re.IGNORECASE)
+_MAIN_PROGRAM_RE = re.compile(r"^[A-Za-z0-9._+-]{1,120}\.exe$", re.IGNORECASE)
 
 
 def set_starred_files(repo: str, patterns: list[str], main: str = "", clear: bool = False) -> None:

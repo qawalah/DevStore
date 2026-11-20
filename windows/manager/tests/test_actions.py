@@ -240,3 +240,11 @@ def test_command_line_tools_open_their_terminal_shortcut(monkeypatch):
     assert actions.open_target(cli) == p
     assert actions.open_target(gui) == actions.app_exe("tool", "tool.exe")
     assert actions.cli_shortcut_path('Bad/..\\Name:*').name == "BadName (command line).lnk"
+
+
+def test_set_starred_files_accepts_any_letter_case_like_the_updater(root, monkeypatch):
+    import json
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    actions.set_starred_files("a/b", ["AnyPS5-Win64.ZIP", "Tool-*.EXE"], main="Tool.EXE")
+    body = json.loads(next((root / "requests").glob("*.json")).read_text())
+    assert body["patterns"] == ["AnyPS5-Win64.ZIP", "Tool-*.EXE"] and body["main"] == "Tool.EXE"

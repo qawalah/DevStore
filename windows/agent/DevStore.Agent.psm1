@@ -578,12 +578,19 @@ function Update-DevStoreStarredApp {
         }
         $names = @($chosen | ForEach-Object { [string]$_.name })
         $key = { param($list) ((@($list) | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object) -join '|') }
-        $sameFiles = $legacy -or ((& $key $names) -eq (& $key $s['installedFiles']))
+        $setKey = & $key $names
+        $sameFiles = $legacy -or ($setKey -eq (& $key $s['installedFiles']))
+        $wantMain = ''
+        if ($null -ne $Override) { $wantMain = [string]$Override['main'] }
+        $sameMain = $legacy -or ($wantMain -eq [string]$s['installedMain'])
+        # The user's own choice (or going back to automatic) applies at once, whatever the update
+        # setting: the pass that made it may have been told to wait for the app to close.
+        if ($s['installed'] -eq $tag -and -not ($sameFiles -and $sameMain) -and ($null -ne $Override -or [bool]$s['installedOverride'])) { $Apply = $true }
         $s['latest'] = $tag
         $appDir = Join-DevStorePath $Root 'apps' $name
         $action = 'update'
         if (-not $s['installed']) { $action = 'install' }
-        elseif ($s['installed'] -eq $tag -and $sameFiles) { $action = 'none' }
+        elseif ($s['installed'] -eq $tag -and $sameFiles -and $sameMain) { $action = 'none' }
 
         if ($action -eq 'none') {
             $s['status'] = 'ok'; $s['lastError'] = $null
@@ -606,10 +613,16 @@ function Update-DevStoreStarredApp {
         # Download, check and unpack once per release and file choice (.verified marks a complete copy).
         $versionsDir = Join-DevStorePath $appDir 'versions'
         $folder = ConvertTo-DevStoreVersionFolder $tag
-        if ($null -ne $Override) { $folder = Get-DevStoreStarredFolderName -Tag $tag -Names $names }
+        # A rebuild of the installed release (other files chosen, or one added) gets its own folder,
+        # so the running copy is never touched.
+        if ($null -ne $Override -or ($s['installed'] -eq $tag -and -not $sameFiles)) { $folder = Get-DevStoreStarredFolderName -Tag $tag -Names $names }
         $target = Join-DevStorePath $versionsDir $folder
         $verified = Join-DevStorePath $target '.verified'
-        if (-not (Test-Path -LiteralPath $verified)) {
+        # .verified says which files the folder holds: the tag (one file, as before) or the tag and the set.
+        $marker = $tag
+        if (-not $legacy) { $marker = "$tag|$setKey" }
+        $built = (Test-Path -LiteralPath $verified) -and (([string](Get-Content -LiteralPath $verified -Raw)).Trim() -eq $marker)
+        if (-not $built) {
             Write-DevStoreProgress -Root $Root -Text "Downloading $Repo $tag"
             $dl = Join-DevStorePath $Root 'downloads'
             if (-not (Test-Path -LiteralPath $dl)) { New-Item -ItemType Directory -Path $dl -Force | Out-Null }
@@ -627,7 +640,7 @@ function Update-DevStoreStarredApp {
                 }
                 Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
             }
-            Set-Content -LiteralPath $verified -Value $tag
+            Set-Content -LiteralPath $verified -Value $marker
         }
         $base = (Get-Item -LiteralPath $target).FullName.TrimEnd('\', '/')
         $prefix = $base.Length + 1
@@ -685,7 +698,7 @@ function Update-DevStoreStarredApp {
         $s['previous'] = $old
         $s['installed'] = $tag
         $s['installedFolder'] = $folder
-        if (-not $legacy) { $s['installedFiles'] = $names }
+        if (-not $legacy) { $s['installedFiles'] = $names; $s['installedMain'] = $wantMain; $s['installedOverride'] = ($null -ne $Override) }
         $s['restartPending'] = $false
         $s['status'] = 'ok'
         $s['lastError'] = $null

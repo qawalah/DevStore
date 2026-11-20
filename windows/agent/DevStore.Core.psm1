@@ -515,7 +515,7 @@ function Select-DevStoreStarredAsset {
 
 # ---- a set of files per release (an exe plus its libraries, say)
 $script:VersionTokenPattern = '(?<![A-Za-z0-9])(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)'
-$script:AssetSystemWords = 'windows|win32|win64|win|x64|x86_64|x86-64|amd64|portable|unpatched|patched'
+$script:AssetSystemWords = 'windows|win32|win64|win|x64|x86_64|x86-64|x86|amd64|i686|i586|i386|ia32|32-bit|64-bit|32bit|64bit|mingw64|mingw32|mingw|msvc|ucrt|gnu|pc|portable|unpatched|patched'
 $script:AssetSkipWords = 'headers|include|sdk|docs|web|wasm|browser|checksums|sha256|sha256sums|sig|signature'
 $script:AssetVariantWords = 'unpatched|legacy|lite|noavx|old|compat'
 $script:StarredMaxFiles = 4
@@ -616,6 +616,12 @@ function Select-DevStoreStarredAssets {
         }
     }
     $chosen = @($groups.Keys | Sort-Object | ForEach-Object { $groups[$_].asset })
+    if (-not $chosen.Count) {
+        # The set rules skip some words (web, docs, sdk...) that an ordinary app name can contain:
+        # whatever the old one-file rule installs, still installs.
+        $single = Select-DevStoreStarredAsset -Assets $Assets
+        if ($single) { $chosen = @($single) }
+    }
     $bytes = [long]0
     foreach ($a in $chosen) { $bytes += [long]$a.size }
     if ($chosen.Count -gt $script:StarredMaxFiles -or $bytes -gt $script:StarredMaxBytes) {

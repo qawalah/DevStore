@@ -625,6 +625,24 @@ Describe 'Select-DevStoreStarredAssets' {
         $r = Select-DevStoreStarredAssets -Assets @((New-Asset 'AnyPS5-Win64.ZIP')) -Tag 'v1'
         @($r.assets).Count | Should -Be 1
     }
+    It 'installs one build when a release has the same app for several CPUs and toolchains' {
+        $rg = 'ripgrep-14.1.0-x86_64-pc-windows-msvc.zip', 'ripgrep-14.1.0-i686-pc-windows-msvc.zip',
+            'ripgrep-14.1.0-x86_64-pc-windows-gnu.zip', 'ripgrep-14.1.0-aarch64-pc-windows-msvc.zip' | ForEach-Object { New-Asset $_ }
+        $r = Select-DevStoreStarredAssets -Assets $rg -Tag '14.1.0'
+        @($r.assets).Count | Should -Be 1
+        $r.assets[0].name | Should -Match 'x86_64-pc-windows-(msvc|gnu)\.zip$'
+        $both = @((New-Asset 'app-1.0-windows-x86.zip'), (New-Asset 'app-1.0-windows-x64.zip'))
+        $r2 = Select-DevStoreStarredAssets -Assets $both -Tag 'v1.0'
+        @($r2.assets).Count | Should -Be 1
+        $r2.assets[0].name | Should -Be 'app-1.0-windows-x64.zip'
+    }
+    It 'still installs a single file whose name contains a word that is skipped in sets' {
+        foreach ($n in 'sdk-manager-win64.zip', 'docs-viewer-windows.zip', 'browser-x-windows.zip') {
+            $r = Select-DevStoreStarredAssets -Assets @((New-Asset $n)) -Tag 'v1'
+            @($r.assets).Count | Should -Be 1
+            $r.assets[0].name | Should -Be $n
+        }
+    }
     It 'refuses more than 4 files with a message' {
         $assets = 'a', 'b', 'c', 'd', 'e' | ForEach-Object { New-Asset "$_-windows.zip" }
         $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1'

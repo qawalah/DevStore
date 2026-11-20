@@ -380,6 +380,12 @@ function patternOf(name) {
   return last ? name.slice(0, last.index) + "*" + name.slice(last.index + last[0].length) : name;
 }
 
+// 'relinker-v0.1.5.exe' -> 'relinker.exe': how the updater saves a standalone exe, so the main program keeps its name across releases.
+function standaloneName(name) {
+  const clean = name.replace(/\.exe$/i, "").replace(/[-_. ]*(?<![A-Za-z0-9])(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)$/i, "");
+  return clean ? `${clean}.exe` : name;
+}
+
 const installable = (name) => /\.(zip|exe)$/i.test(name);
 
 function chooseButton(i) {
@@ -432,7 +438,7 @@ document.addEventListener("click", async (e) => {
   e.stopPropagation();
   const repo = (auto || apply).dataset.chooseAuto || (auto || apply).dataset.chooseApply;
   const res = auto ? await api().set_starred_files(repo, [], "", true)
-    : await api().set_starred_files(repo, choose.picked.map(patternOf), choose.main ? patternOf(choose.main) : "", false);
+    : await api().set_starred_files(repo, choose.picked.map(patternOf), choose.main ? standaloneName(choose.main) : "", false);
   toast(res.message, res.ok);
   if (res.ok) choose = null;
   await load();
