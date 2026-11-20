@@ -149,6 +149,10 @@ class Api:
         return self._result(lambda: actions.install_starred(repo, mode or None),
                             "Installing. DevStore keeps it updated the way you chose.")
 
+    def set_starred_files(self, repo: str, patterns: list, main: str = "", clear: bool = False) -> dict:
+        msg = "Choosing files automatically again." if clear else "Using your chosen files. This takes under a minute."
+        return self._result(lambda: actions.set_starred_files(repo, list(patterns or []), main or "", bool(clear)), msg)
+
     def set_starred_auto(self, on: bool) -> dict:
         msg = "Apps you star from now on install by themselves." if on else "Starred apps install only when you click Install."
         return self._result(lambda: actions.set_starred_auto_install(bool(on)), msg)
@@ -194,7 +198,7 @@ class Api:
         app = self._find(repo)
         if app is None:
             return {"ok": False, "message": "App not found."}
-        return self._result(lambda: actions.launch(actions.app_exe(app["name"], app["exe"])), f"Opening {app['displayName']}.")
+        return self._result(lambda: actions.launch(actions.open_target(app)), f"Opening {app['displayName']}.")
 
     def relaunch_app(self, repo: str) -> dict:
         """Force close, then open again. For DevStore itself: open the new version, then quit this one."""

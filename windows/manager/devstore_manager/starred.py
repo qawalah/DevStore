@@ -34,13 +34,26 @@ def build(data: dict, seen: dict, apps: Optional[list] = None) -> tuple[dict, di
             seen[r["repo"]] = tag
         app = installed.get(str(r["repo"]).lower())
         windows = (latest or {}).get("windows")
+        files = _files((latest or {}).get("windowsFiles"), windows)
         items.append({**r, "latest": latest, "isNew": bool(tag) and seen.get(r["repo"]) != tag,
-                      "installable": isinstance(windows, dict) and bool(windows.get("name")),
+                      "installable": bool(files),
+                      "files": files,
+                      "override": bool((latest or {}).get("windowsOverride")),
+                      "filesError": str((latest or {}).get("windowsError") or ""),
                       "app": {k: app[k] for k in ("repo", "status", "actions", "installedVersion", "updates")} if app else None})
     items.sort(key=lambda i: (i["latest"] is None, -_stamp((i["latest"] or {}).get("publishedAt"))))
     view = {"items": items, "newCount": sum(1 for i in items if i["isNew"]),
             "updated": str(data.get("updated") or ""), "error": str(data.get("error") or "")}
     return view, seen
+
+
+def _files(listed: Any, windows: Any) -> list:
+    """The files DevStore would install: the updater's list, or (older starred.json) its one Windows file."""
+    if isinstance(listed, list):
+        return [{"name": f["name"], "size": f.get("size") or 0} for f in listed if isinstance(f, dict) and f.get("name")]
+    if isinstance(windows, dict) and windows.get("name"):
+        return [{"name": windows["name"], "size": windows.get("size") or 0}]
+    return []
 
 
 def mark_seen(seen: dict, repo: str, tag: str) -> dict:

@@ -289,3 +289,15 @@ def test_starred_app_update_waiting_with_free_form_tags():
     assert a["status"]["kind"] == "update"
     assert a["actions"][0] == "update"
     assert a["updates"] == "notify"
+
+
+def test_command_line_tool_is_labelled_and_typed():
+    v = view(config={"apps": [{"repo": "boykopovar/AnyPS5", "source": "starred"}]},
+             state={"lastRun": T, "lastRunResult": "ok",
+                    "apps": {"boykopovar/AnyPS5": {"name": "starred-boykopovar--anyps5", "type": "cli", "installed": "v0.1.5",
+                                                   "latest": "v0.1.5", "status": "ok", "displayName": "AnyPS5", "source": "starred",
+                                                   "exe": "relinker.exe"}}})
+    a = app(v, "boykopovar/AnyPS5")
+    assert a["type"] == "Command-line tool"
+    assert a["appType"] == "cli"
+    assert "open" in a["actions"]

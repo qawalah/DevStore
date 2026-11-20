@@ -149,6 +149,33 @@ def install_starred(repo: str, mode: str | None = None) -> None:
     start_updater()
 
 
+_FILE_PATTERN_RE = re.compile(r"^[A-Za-z0-9._+*-]{1,120}\.(zip|exe)$")
+_MAIN_PROGRAM_RE = re.compile(r"^[A-Za-z0-9._+-]{1,120}\.exe$")
+
+
+def set_starred_files(repo: str, patterns: list[str], main: str = "", clear: bool = False) -> None:
+    """Choose which files of a starred repo's release DevStore installs (`patterns` use * for the
+    version, e.g. relinker-*.exe), or go back to automatic with clear=True."""
+    repo = repo.strip()
+    if not REPO_RE.match(repo):
+        raise ValueError(f"Can't change the files of {repo!r}.")
+    if clear:
+        _write_request("set-files", repo, patterns=[], main="", clear=True)
+        start_updater()
+        return
+    patterns = [str(p) for p in (patterns or [])]
+    if not 1 <= len(patterns) <= 4:
+        raise ValueError("Pick between 1 and 4 files.")
+    for p in patterns:
+        if not _FILE_PATTERN_RE.match(p) or ".." in p:
+            raise ValueError(f"{p!r} isn't a file name DevStore can install (.zip or .exe).")
+    main = (main or "").strip()
+    if main and (not _MAIN_PROGRAM_RE.match(main) or ".." in main):
+        raise ValueError(f"{main!r} can't be the main program (it must be an .exe).")
+    _write_request("set-files", repo, patterns=patterns, main=main, clear=False)
+    start_updater()
+
+
 def set_starred_auto_install(on: bool) -> None:
     """Install repos you star from now on by themselves (when they have a Windows download)."""
     _write_request("set-starred", value="on" if on else "off")
@@ -325,6 +352,20 @@ def app_exe(name: str, exe: str) -> Path:
 
 def data_dir(name: str) -> Path:
     return Path(os.environ.get("ProgramData", r"C:\ProgramData")) / name
+
+
+def cli_shortcut_path(display_name: str) -> Path:
+    """The Start-menu shortcut the updater makes for a command-line tool: a terminal in its folder."""
+    safe = re.sub(r'[\\/:*?"<>|]', "", display_name or "").replace("..", "")
+    base = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+    return base / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "DevStore" / f"{safe} (command line).lnk"
+
+
+def open_target(app: dict) -> Path:
+    """What "Open" starts: the program for a window app, the terminal shortcut for a command-line tool."""
+    if app.get("appType") == "cli":
+        return cli_shortcut_path(str(app.get("displayName") or app["name"]))
+    return app_exe(app["name"], app["exe"])
 
 
 def launch(path: Path) -> None:

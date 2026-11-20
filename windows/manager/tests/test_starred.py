@@ -59,3 +59,24 @@ def test_installable_and_install_state_are_joined_in():
 def test_only_github_avatars_are_used_as_icons():
     assert starred.safe_avatar("https://avatars.githubusercontent.com/u/1?v=4")
     assert not starred.safe_avatar("https://evil.example/a.png")
+
+
+def test_items_carry_the_chosen_files():
+    two = entry("boykopovar/AnyPS5", "v0.1.5")
+    two["latest"]["windows"] = {"name": "prx-windows-v0.1.5.zip", "size": 10}
+    two["latest"]["windowsFiles"] = [{"name": "prx-windows-v0.1.5.zip", "size": 10}, {"name": "relinker-v0.1.5.exe", "size": 20}]
+    two["latest"]["windowsOverride"] = True
+    two["latest"]["windowsError"] = None
+    old = entry("a/old", "v1")
+    old["latest"]["windows"] = {"name": "old-win.zip", "size": 5}
+    big = entry("a/big", "v1")
+    big["latest"]["windows"] = None
+    big["latest"]["windowsFiles"] = []
+    big["latest"]["windowsError"] = "This release has more Windows files than DevStore installs by itself."
+    view, _ = starred.build({"repos": [two, old, big]}, {})
+    by = {i["repo"]: i for i in view["items"]}
+    assert [f["name"] for f in by["boykopovar/AnyPS5"]["files"]] == ["prx-windows-v0.1.5.zip", "relinker-v0.1.5.exe"]
+    assert by["boykopovar/AnyPS5"]["override"] is True and by["boykopovar/AnyPS5"]["installable"] is True
+    assert by["a/old"]["files"] == [{"name": "old-win.zip", "size": 5}] and by["a/old"]["installable"] is True
+    assert by["a/big"]["files"] == [] and by["a/big"]["installable"] is False
+    assert "more Windows files" in by["a/big"]["filesError"]

@@ -228,7 +228,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
         status = _status(s, in_config, pend.get(key), service, is_running)
         is_starred = key in from_starred or (s or {}).get("source") == "starred"
         actions = _actions(s, in_config, pend.get(key), service, is_self, is_running, is_starred)
-        type_label = {"gui": "App", "service": "Service"}.get(app_type, "")
+        type_label = {"gui": "App", "service": "Service", "cli": "Command-line tool"}.get(app_type, "")
         # Listed for its Android or Docker part only: nothing to install on this PC.
         on_windows = c.get("windows") is not False or in_config or bool(s)
         platforms = _platforms(c, status if on_windows else None, nas_rows.get(key))
@@ -244,6 +244,7 @@ def build_view(config: dict, state: dict, catalog: dict, services: dict[str, str
             "displayName": (s or {}).get("displayName") or c.get("displayName") or name,
             "description": c.get("description") or "",
             "type": type_label,
+            "appType": app_type,
             "platforms": platforms,
             "installed": bool(in_config and s and s.get("installed")),
             "installedVersion": (s or {}).get("installed") or "",

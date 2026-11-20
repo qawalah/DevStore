@@ -202,3 +202,41 @@ def test_starred_auto_install_switch(root, monkeypatch):
     monkeypatch.setattr(actions, "start_updater", lambda: True)
     actions.set_starred_auto_install(True)
     assert [json.loads(f.read_text()) for f in (root / "requests").glob("*.json")] == [{"action": "set-starred", "value": "on"}]
+
+
+def test_set_starred_files_writes_request(root, monkeypatch):
+    import json
+    started = []
+    monkeypatch.setattr(actions, "start_updater", lambda: started.append(1) or True)
+    actions.set_starred_files("boykopovar/AnyPS5", ["relinker-*.exe", "prx-windows-*.zip"], "relinker.exe")
+    actions.set_starred_files("boykopovar/AnyPS5", [], clear=True)
+    bodies = [json.loads(f.read_text()) for f in sorted((root / "requests").glob("*.json"))]
+    assert {"action": "set-files", "repo": "boykopovar/AnyPS5", "patterns": ["relinker-*.exe", "prx-windows-*.zip"],
+            "main": "relinker.exe", "clear": False} in bodies
+    assert {"action": "set-files", "repo": "boykopovar/AnyPS5", "patterns": [], "main": "", "clear": True} in bodies
+    assert len(started) == 2
+
+
+def test_set_starred_files_rejects_bad_input(root, monkeypatch):
+    monkeypatch.setattr(actions, "start_updater", lambda: True)
+    bad = [[], ["../x.zip"], ["sub/x.zip"], ["x;y.exe"], ["x.msi"], ["a*.zip", "b*.zip", "c*.zip", "d*.zip", "e*.zip"], ["x" * 200 + ".zip"]]
+    for patterns in bad:
+        with pytest.raises(ValueError):
+            actions.set_starred_files("a/b", patterns)
+    with pytest.raises(ValueError):
+        actions.set_starred_files("a/b", ["x.zip"], main="x.zip")
+    with pytest.raises(ValueError):
+        actions.set_starred_files("not a repo", ["x.zip"])
+    assert list((root / "requests").glob("*.json")) == []
+
+
+def test_command_line_tools_open_their_terminal_shortcut(monkeypatch):
+    monkeypatch.setenv("ProgramData", r"C:\ProgramData")
+    p = actions.cli_shortcut_path("AnyPS5")
+    assert p.name == "AnyPS5 (command line).lnk"
+    assert p.parent.name == "DevStore"
+    cli = {"name": "starred-x--anyps5", "exe": "relinker.exe", "displayName": "AnyPS5", "appType": "cli"}
+    gui = {"name": "tool", "exe": "tool.exe", "displayName": "Tool", "appType": "gui"}
+    assert actions.open_target(cli) == p
+    assert actions.open_target(gui) == actions.app_exe("tool", "tool.exe")
+    assert actions.cli_shortcut_path('Bad/..\\Name:*').name == "BadName (command line).lnk"
