@@ -488,6 +488,68 @@ function Select-DevStoreStarredAsset {
     return $best
 }
 
+# ---- a set of files per release (an exe plus its libraries, say)
+$script:VersionTokenPattern = 'v?\d+(?:\.\d+)+'
+$script:AssetSystemWords = 'windows|win32|win64|win|x64|x86_64|x86-64|amd64|portable|unpatched|patched'
+$script:AssetSkipWords = 'headers|include|sdk|docs|web|wasm|browser|checksums|sha256|sha256sums|sig|signature'
+$script:AssetVariantWords = 'unpatched|legacy|lite|noavx|old|compat'
+$script:StarredMaxFiles = 4
+$script:StarredMaxBytes = 600MB
+
+function Get-DevStoreAssetBaseName {
+    # 'prx-windows-unpatched-v0.1.5.zip' -> 'prx': the file's name without its extension,
+    # version, system and variant words. Files with the same base name are versions of one thing.
+    param([string]$Name, [string]$Tag)
+    $n = ($Name.ToLowerInvariant() -replace '\.(zip|exe)$', '')
+    if ($Tag) { $n = [regex]::Replace($n, [regex]::Escape($Tag.ToLowerInvariant()), ' ') }
+    $n = [regex]::Replace($n, $script:VersionTokenPattern, ' ')
+    $n = [regex]::Replace($n, "(?<![a-z0-9])($($script:AssetSystemWords))(?![a-z0-9])", ' ')
+    $n = [regex]::Replace($n, '[-_. ]+', '-').Trim('-')
+    return $n
+}
+
+function ConvertTo-DevStoreStandaloneExeName {
+    # 'relinker-v0.1.5.exe' -> 'relinker.exe', so the command is the same after every update.
+    param([string]$Name, [string]$Tag)
+    $stem = ($Name -replace '\.exe$', '')
+    $clean = $stem
+    if ($Tag) { $clean = [regex]::Replace($clean, '[-_. ]*' + [regex]::Escape($Tag) + '$', '', 'IgnoreCase') }
+    $clean = [regex]::Replace($clean, '[-_. ]*' + $script:VersionTokenPattern + '$', '', 'IgnoreCase')
+    if (-not $clean) { return $Name }
+    return "$clean.exe"
+}
+
+function Select-DevStoreStarredAssets {
+    # The Windows files of a release to install together. Returns
+    # @{ assets = @(...); error = <string or $null> }; an empty set without an error
+    # means the release has nothing DevStore can install.
+    param($Assets, [string]$Tag, $Override = $null)
+    $groups = @{}
+    foreach ($a in @($Assets)) {
+        if ($null -eq $a -or -not $a.name) { continue }
+        $name = [string]$a.name
+        $score = Get-DevStoreStarredAssetScore -Name $name
+        if ($null -eq $score) { continue }
+        $lower = $name.ToLowerInvariant()
+        if ($lower -match "(?<![a-z0-9])($($script:AssetSkipWords))(?![a-z0-9])") { continue }
+        if ($lower -match "(?<![a-z0-9])($($script:AssetVariantWords))(?![a-z0-9])") { $score -= 20 }
+        $base = Get-DevStoreAssetBaseName -Name $name -Tag $Tag
+        if (-not $base) { $base = $lower }
+        $cur = $groups[$base]
+        if ($null -eq $cur -or $score -gt $cur.score -or ($score -eq $cur.score -and $name.Length -lt ([string]$cur.asset.name).Length)) {
+            $groups[$base] = @{ asset = $a; score = $score }
+        }
+    }
+    $chosen = @($groups.Keys | Sort-Object | ForEach-Object { $groups[$_].asset })
+    $bytes = [long]0
+    foreach ($a in $chosen) { $bytes += [long]$a.size }
+    if ($chosen.Count -gt $script:StarredMaxFiles -or $bytes -gt $script:StarredMaxBytes) {
+        $mb = [math]::Round($bytes / 1MB)
+        return @{ assets = @(); error = "This release has more Windows files than DevStore installs by itself ($($chosen.Count) files, $mb MB). Use Choose files… to pick what you need." }
+    }
+    return @{ assets = $chosen; error = $null }
+}
+
 function Select-DevStoreStarredExe {
     # The program to open from an unpacked release: @(@{ path = 'sub\app.exe'; size }) -> 'sub\app.exe'.
     # Skips uninstallers, updaters, crash reporters and helpers; prefers the repo's
@@ -720,4 +782,5 @@ Export-ModuleMember -Function ConvertFrom-DevStoreTag, Select-DevStoreRelease, C
     Set-DevStoreConfigNas, ConvertTo-DevStoreUtcText, Get-DevStoreProperty,
     Get-DevStoreAndroidRelease, Select-DevStorePlatformShots,
     Select-DevStoreStarredRelease, Get-DevStoreStarredAssetScore, Select-DevStoreStarredAsset, Select-DevStoreStarredExe,
+    Get-DevStoreAssetBaseName, ConvertTo-DevStoreStandaloneExeName, Select-DevStoreStarredAssets,
     ConvertTo-DevStoreStarredAppName, ConvertTo-DevStoreVersionFolder, Get-DevStoreAssetSha256, Get-DevStoreStarredAutoInstall

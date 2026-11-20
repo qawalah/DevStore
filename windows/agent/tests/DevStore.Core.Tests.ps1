@@ -588,3 +588,65 @@ Describe 'Installing starred apps: requests and auto-install' {
         @($r.known) | Should -Be @('b/new')
     }
 }
+
+Describe 'Select-DevStoreStarredAssets' {
+    BeforeAll {
+        function New-Asset($Name, $Size = 1MB) { [pscustomobject]@{ name = $Name; size = [long]$Size; id = 1 } }
+        $script:AnyPS5 = @(
+            'relinker-v0.1.5.exe', 'relinker-v0.1.5', 'prx-windows-v0.1.5.zip', 'prx-windows-v0.1.5.tar.gz',
+            'prx-windows-unpatched-v0.1.5.zip', 'prx-windows-unpatched-v0.1.5.tar.gz', 'prx-linux-v0.1.5.zip',
+            'prx-linux-v0.1.5.tar.gz', 'prx-headers-v0.1.5.zip', 'prx-headers-v0.1.5.tar.gz', 'web-v0.1.5.zip') |
+            ForEach-Object { New-Asset $_ }
+    }
+    It 'picks the exe and the libs zip for AnyPS5 v0.1.5' {
+        $r = Select-DevStoreStarredAssets -Assets $script:AnyPS5 -Tag 'v0.1.5'
+        @($r.assets | ForEach-Object { $_.name } | Sort-Object) | Should -Be @('prx-windows-v0.1.5.zip', 'relinker-v0.1.5.exe')
+        $r.error | Should -BeNullOrEmpty
+    }
+    It 'treats a zip and a portable exe of the same app as one app' {
+        $assets = @((New-Asset 'tool-win64.zip'), (New-Asset 'tool-win64-portable.exe'))
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1.0.0'
+        @($r.assets).Count | Should -Be 1
+        $r.assets[0].name | Should -Be (Select-DevStoreStarredAsset -Assets $assets).name
+    }
+    It 'behaves as before for a single windows zip' {
+        $assets = @((New-Asset 'tool-1.2-windows-x64.zip'), (New-Asset 'tool-1.2-linux.tar.gz'))
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1.2'
+        @($r.assets).Count | Should -Be 1
+        $r.assets[0].name | Should -Be 'tool-1.2-windows-x64.zip'
+    }
+    It 'gives no files and no error when there are only installers or other systems' {
+        $assets = @((New-Asset 'setup.exe'), (New-Asset 'tool.msi'), (New-Asset 'tool-linux.zip'))
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1'
+        @($r.assets).Count | Should -Be 0
+        $r.error | Should -BeNullOrEmpty
+    }
+    It 'does not care about letter case' {
+        $r = Select-DevStoreStarredAssets -Assets @((New-Asset 'AnyPS5-Win64.ZIP')) -Tag 'v1'
+        @($r.assets).Count | Should -Be 1
+    }
+    It 'refuses more than 4 files with a message' {
+        $assets = 'a', 'b', 'c', 'd', 'e' | ForEach-Object { New-Asset "$_-windows.zip" }
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1'
+        @($r.assets).Count | Should -Be 0
+        $r.error | Should -Match 'more Windows files'
+    }
+    It 'refuses more than 600 MB with a message' {
+        $assets = @((New-Asset 'a-windows.zip' 400MB), (New-Asset 'b-windows.zip' 400MB))
+        $r = Select-DevStoreStarredAssets -Assets $assets -Tag 'v1'
+        @($r.assets).Count | Should -Be 0
+        $r.error | Should -Match 'MB'
+    }
+}
+
+Describe 'Starred file names' {
+    It 'removes the version, system and variant words from a base name' {
+        Get-DevStoreAssetBaseName -Name 'relinker-v0.1.5.exe' -Tag 'v0.1.5' | Should -Be 'relinker'
+        Get-DevStoreAssetBaseName -Name 'prx-windows-unpatched-v0.1.5.zip' -Tag 'v0.1.5' | Should -Be 'prx'
+        Get-DevStoreAssetBaseName -Name 'prx-windows-v0.1.5.zip' -Tag 'v0.1.5' | Should -Be 'prx'
+    }
+    It 'saves a standalone exe without its version' {
+        ConvertTo-DevStoreStandaloneExeName -Name 'relinker-v0.1.5.exe' -Tag 'v0.1.5' | Should -Be 'relinker.exe'
+        ConvertTo-DevStoreStandaloneExeName -Name 'tool.exe' -Tag 'v0.1.5' | Should -Be 'tool.exe'
+    }
+}
