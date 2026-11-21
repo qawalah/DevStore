@@ -152,8 +152,7 @@ def _actions(s: Optional[dict], in_config: bool, pending: Optional[str], service
         else:
             acts.append("restart")
     elif is_self:
-        if s.get("restartPending"):
-            acts.append("relaunch")   # DevStore restarting itself to use its update
+        acts.append("relaunch")   # DevStore can always restart itself (it matters most right after an update)
     elif running:
         acts += ["relaunch", "close"]  # relaunch = force close, then open again
     else:

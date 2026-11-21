@@ -121,7 +121,7 @@ def test_manager_itself_is_not_removable_and_sorted_last():
     v = view(config={"apps": [{"repo": "qawalah/DevStore"}, {"repo": "qawalah/zed"}]}, state=st)
     assert [a["repo"] for a in v["apps"]] == ["qawalah/zed", "qawalah/DevStore"]
     me = app(v, "qawalah/DevStore")
-    assert me["isSelf"] is True and me["actions"] == ["data"]
+    assert me["isSelf"] is True and me["actions"] == ["relaunch", "data"]   # DevStore can always restart itself
 
 
 def test_service_with_unknown_state_offers_restart():
@@ -221,7 +221,7 @@ def test_devstore_running_the_installed_version_is_not_waiting_for_a_restart():
     cfg = {"apps": [{"repo": "qawalah/DevStore"}]}
     me = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"devstore-manager"}, self_version="2.1.0"), "qawalah/DevStore")
     assert me["status"]["text"] == "Running · up to date"
-    assert "relaunch" not in me["actions"]
+    assert "relaunch" in me["actions"]   # restarting itself is always offered, waiting for an update or not
     old = app(store.build_view(cfg, st, {}, {}, {}, NOW, running={"devstore-manager"}, self_version="2.0.2"), "qawalah/DevStore")
     assert old["status"]["text"].startswith("Updated to 2.1.0")
 

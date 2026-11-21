@@ -92,6 +92,7 @@ function buttonHtml(action, repo, opts = {}) {
   const app = view && view.apps.find((x) => x.repo === repo);
   let label = action === "update" && app && app.status.text.startsWith("Update downloaded") ? "Install update" : a.label;
   if (action === "open" && app && app.appType === "cli") label = "Open terminal";
+  if (action === "relaunch" && app && app.isSelf) label = "Restart DevStore";
   const text = opts.compact ? "" : `<span>${label}</span>`;
   const title = opts.compact ? ` title="${label}" aria-label="${label}"` : "";
   return `<button class="btn ${a.cls}" data-action="${action}" data-repo="${esc(repo)}"${title}>${ICONS[a.icon]}${text}</button>`;
