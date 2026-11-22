@@ -116,6 +116,10 @@ How lessons get here: see [README.md](README.md).
   Give each tool its own input and its own kind of answer, and before merging two, write down what the merge loses.
   *(SunLighn, 2026-11-22: two tools that both started from a subject were folded into one in 3.6 and lost five
   things; the owner asked for the third tool back, and 3.24 returned it with a different input.)*
+- **Two settings that fix each other are one input and one result.** Let one drive, show the other as its result, and
+  let the user swap which (Auto / Fixed). Fold only what is rarely changed, and all of it, never half of what matters.
+  *(SunLighn, 2026-11-22: the sun's height and the distance each had a slider though one decides the other, and half
+  the settings were folded; the owner found it confusing and called the folded ones critical.)*
 
 ## Links between devices (phone, TV, PC)
 
