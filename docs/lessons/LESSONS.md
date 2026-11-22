@@ -112,6 +112,10 @@ How lessons get here: see [README.md](README.md).
 - **Every route ends on a screen that says what you can do next.** *(SunLighn, 2026-11-15: "Stand here" placed a
   pin and the owner was left on a map wondering "now what?". Every tool now ends on "Your shot": the moment, then
   Open the viewfinder, Save, Remind me, Directions.)*
+- **Two tools are one tool if they start from the same thing; a tool earns its place by what it asks for first.**
+  Give each tool its own input and its own kind of answer, and before merging two, write down what the merge loses.
+  *(SunLighn, 2026-11-22: two tools that both started from a subject were folded into one in 3.6 and lost five
+  things; the owner asked for the third tool back, and 3.24 returned it with a different input.)*
 
 ## Links between devices (phone, TV, PC)
 
@@ -167,3 +171,8 @@ How lessons get here: see [README.md](README.md).
 - **Never change the layout from inside a layout pass.** Post the change (`view.post(...)`) and skip a rebuild
   when nothing changed. *(SunLighn, 2026-11-15: a layout-change listener rebuilt the Home screen while the map was
   laid out; the new cards kept a size of zero and the test picture was blank.)*
+- **When Maven Central answers 429 in a cloud container, use Google's mirror of it, locally.** A
+  `~/.gradle/init.d/mirror.gradle` (never committed) puts `https://maven-central.storage-download.googleapis.com/maven2/`
+  first in `pluginManagement` and `dependencyResolutionManagement`, and sets the test task's
+  `robolectric.dependency.repo.url` to it: Robolectric fetches its Android jar at test time by itself. *(SunLighn,
+  2026-11-22: the build passed and every screen test failed with "Failed to fetch maven artifact".)*
