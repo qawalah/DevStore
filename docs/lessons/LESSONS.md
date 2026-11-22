@@ -120,6 +120,10 @@ How lessons get here: see [README.md](README.md).
   let the user swap which (Auto / Fixed). Fold only what is rarely changed, and all of it, never half of what matters.
   *(SunLighn, 2026-11-22: the sun's height and the distance each had a slider though one decides the other, and half
   the settings were folded; the owner found it confusing and called the folded ones critical.)*
+- **Say each thing once, where it first matters.** A short overview first (a sentence a card, no jargon), a which-mode
+  comparison (what you give, what you get), a guide per mode with only its own steps, and the shared parts (the map, the
+  result screen, a full-screen view) as their own guides, shown once the first time they matter, never stacked.
+  *(SunLighn, 2026-11-22: every mode's guide repeated the same cards; the owner asked to split them and avoid repetition.)*
 
 ## Links between devices (phone, TV, PC)
 
