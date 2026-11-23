@@ -124,6 +124,10 @@ How lessons get here: see [README.md](README.md).
   comparison (what you give, what you get), a guide per mode with only its own steps, and the shared parts (the map, the
   result screen, a full-screen view) as their own guides, shown once the first time they matter, never stacked.
   *(SunLighn, 2026-11-22: every mode's guide repeated the same cards; the owner asked to split them and avoid repetition.)*
+- **A setting that changes nothing the user can see is a bug, even when the sums use it.** Move each control and name
+  what moved on screen; if nothing did, make it drive something visible or take it out. *(SunLighn, 2026-11-23: a lens
+  range only renamed a focal length, and Auto distance read the same as Fixed; the owner: "the lens doesn't change
+  anything".)*
 
 ## Links between devices (phone, TV, PC)
 
